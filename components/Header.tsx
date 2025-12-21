@@ -6,12 +6,12 @@ import { Badge } from './ui/badge';
 export const Header: React.FC = () => {
   const [imageError, setImageError] = useState(false);
   // Standard convention: public folder contents are served at root
-  const [logoSrc, setLogoSrc] = useState("/logo.jpeg");
+  const [logoSrc, setLogoSrc] = useState("https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg");
 
   const handleImageError = () => {
     // If /logo.jpeg fails, try /public/logo.jpeg (raw structure)
-    if (logoSrc === "/logo.jpeg") {
-      setLogoSrc("/public/logo.jpeg");
+    if (logoSrc === "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg") {
+      setLogoSrc("https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg");
     } else {
       // If both fail, show the fallback icon
       setImageError(true);
