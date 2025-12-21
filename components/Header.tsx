@@ -1,17 +1,42 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Layers, Terminal, ShieldCheck, Moon } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 
 export const Header: React.FC = () => {
+  const [imageError, setImageError] = useState(false);
+  // Standard convention: public folder contents are served at root
+  const [logoSrc, setLogoSrc] = useState("/logo.jpeg");
+
+  const handleImageError = () => {
+    // If /logo.jpeg fails, try /public/logo.jpeg (raw structure)
+    if (logoSrc === "/logo.jpeg") {
+      setLogoSrc("/public/logo.jpeg");
+    } else {
+      // If both fail, show the fallback icon
+      setImageError(true);
+    }
+  };
+
   return (
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
       <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between relative">
         
         {/* Left Side - Logo */}
         <div className="flex items-center gap-4 z-20 shrink-0">
-          <div className="bg-primary/10 p-2 rounded-lg border border-primary/20">
-            <Layers className="w-6 h-6 text-primary" />
+          <div className="relative h-10 w-10 md:h-12 md:w-12 rounded-full border-2 border-primary/20 overflow-hidden shadow-sm hover:border-primary/40 transition-colors bg-muted group">
+            {!imageError ? (
+              <img 
+                src={logoSrc} 
+                alt="Dziłtǫ́ǫ́ Logo" 
+                className="w-full h-full object-cover"
+                onError={handleImageError}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-primary/10">
+                 <Layers className="w-5 h-5 text-primary" />
+              </div>
+            )}
           </div>
         </div>
 
