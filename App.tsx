@@ -1,22 +1,26 @@
+
 import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { InputSection } from './components/InputSection';
 import { OutputSection } from './components/OutputSection';
 import { parseIGT } from './services/igtxParser';
-import { ParseReport } from './types';
+import { ParseReport, LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics } from './types';
+import { translations } from './services/translations';
 
 function App() {
   const [input, setInput] = useState<string>('');
   const [report, setReport] = useState<ParseReport | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [profile, setProfile] = useState<LanguageProfile>('generic');
+  const [lang, setLang] = useState<UILanguage>('en');
 
-  const handleProcess = () => {
+  const handleProcess = (sourceMeta: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics) => {
     if (!input.trim()) return;
     setIsProcessing(true);
     
     // Simulate slight delay for "Processing" feel (UI feedback)
     setTimeout(() => {
-      const result = parseIGT(input);
+      const result = parseIGT(input, profile, sourceMeta, undefined, diagnostics);
       setReport(result);
       setIsProcessing(false);
     }, 400);
@@ -27,41 +31,45 @@ function App() {
     setReport(null);
   };
 
+  const t = translations[lang];
+
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20 selection:text-primary overflow-x-hidden">
-      <Header />
+    <div 
+      className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20 selection:text-primary overflow-x-hidden"
+      dir={lang === 'ar' ? 'rtl' : 'ltr'}
+    >
+      <Header lang={lang} setLang={setLang} />
       
       <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6 items-start justify-center">
         
-        {/* Input Column 
-            - Resizable vertically
-            - Responsive height (500px mobile, 800px desktop start)
-            - Flex-1 to take available width
-        */}
+        {/* Input Column */}
         <div className="w-full lg:flex-1 h-[500px] lg:h-[800px] min-h-[400px] resize-y overflow-hidden rounded-lg shadow-sm border border-transparent hover:border-border/50 transition-colors">
           <InputSection 
             input={input} 
             setInput={setInput} 
             onProcess={handleProcess}
             onClear={handleClear}
+            profile={profile}
+            setProfile={setProfile}
+            lang={lang}
           />
         </div>
 
-        {/* Output Column 
-            - Resizable vertically
-            - Responsive height
-            - Relative positioning for overlay
-        */}
+        {/* Output Column */}
         <div className="w-full lg:flex-1 h-[500px] lg:h-[800px] min-h-[400px] resize-y overflow-hidden rounded-lg shadow-sm border border-transparent hover:border-border/50 transition-colors relative">
           {isProcessing && (
             <div className="absolute inset-0 bg-background/50 backdrop-blur-[2px] z-20 flex items-center justify-center rounded-lg border border-primary/20">
               <div className="flex flex-col items-center gap-4 bg-card p-6 rounded-xl border shadow-xl">
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                <span className="text-primary font-mono text-xs tracking-widest uppercase animate-pulse">Processing</span>
+                <span className="text-primary font-mono text-xs tracking-widest uppercase animate-pulse">{t.processing}</span>
               </div>
             </div>
           )}
-          <OutputSection report={report} />
+          <OutputSection 
+            report={report} 
+            onUpdateReport={setReport}
+            lang={lang} 
+          />
         </div>
 
       </main>

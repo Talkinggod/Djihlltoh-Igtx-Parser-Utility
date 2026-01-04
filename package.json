@@ -1,5 +1,5 @@
 {
-  "name": "dziłtǫ́ǫ́-(djihlltoh)",
+  "name": "dziłtǫ́ǫ́-(djihlltoh)-djihlltoh-igtx-parser-utility",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,17 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "lucide-react": "^0.562.0",
-    "clsx": "2.1.0",
-    "tailwind-merge": "2.2.1",
-    "pdfjs-dist": "3.11.174"
+    "react": "^19.2.3",
+    "pdfjs-dist": "3.11.174",
+    "tesseract.js": "5.1.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.4.0",
+    "@google/genai": "^1.34.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

@@ -1,22 +1,20 @@
+
 import React, { useState } from 'react';
-import { Layers, Terminal, ShieldCheck, Moon } from 'lucide-react';
+import { Layers, Terminal, ShieldCheck, Globe } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { translations } from '../services/translations';
+import { UILanguage } from '../types';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+    lang: UILanguage;
+    setLang: (l: UILanguage) => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ lang, setLang }) => {
   const [imageError, setImageError] = useState(false);
-  // Standard convention: public folder contents are served at root
-  const [logoSrc, setLogoSrc] = useState("https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg");
-
-  const handleImageError = () => {
-    // If /logo.jpeg fails, try /public/logo.jpeg (raw structure)
-    if (logoSrc === "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg") {
-      setLogoSrc("https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg");
-    } else {
-      // If both fail, show the fallback icon
-      setImageError(true);
-    }
-  };
+  const logoSrc = "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg";
+  const t = translations[lang];
 
   return (
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
@@ -30,7 +28,7 @@ export const Header: React.FC = () => {
                 src={logoSrc} 
                 alt="Dziłtǫ́ǫ́ Logo" 
                 className="w-full h-full object-cover"
-                onError={handleImageError}
+                onError={() => setImageError(true)}
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center bg-primary/10">
@@ -43,30 +41,40 @@ export const Header: React.FC = () => {
         {/* Center - Title & Subtitle */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center w-full max-w-[60%] md:max-w-none pointer-events-none z-10 flex flex-col items-center justify-center">
             <h1 className="text-sm md:text-lg font-bold tracking-tight pointer-events-auto truncate w-full px-2">
-              Djihlltoh Igtx Parser Utility
+              {t.title}
             </h1>
             <p className="text-[10px] text-muted-foreground font-mono hidden md:block pointer-events-auto whitespace-nowrap">
-              by Talkinggod AI / Talkinggod Labs — Níímą́ą́ʼ Bee Naalkaah
+              {t.subtitle}
             </p>
         </div>
 
         {/* Right Side - Controls */}
-        <div className="flex items-center gap-4 z-20 shrink-0">
+        <div className="flex items-center gap-2 md:gap-4 z-20 shrink-0">
            <Badge variant="outline" className="hidden lg:flex gap-1.5 border-emerald-900/50 bg-emerald-950/20 text-emerald-500">
              <ShieldCheck className="w-3 h-3" />
-             DETERMINISTIC
+             {t.deterministic}
            </Badge>
            
            <Badge variant="secondary" className="hidden md:flex gap-1.5 font-mono">
              <Terminal className="w-3 h-3" />
-             v1.0.2
+             v1.9
            </Badge>
 
            <div className="w-px h-6 bg-border hidden sm:block"></div>
-
-           <Button variant="ghost" size="icon" className="text-muted-foreground">
-             <Moon className="w-5 h-5" />
-           </Button>
+           
+           <div className="flex items-center gap-1">
+                <Globe className="w-4 h-4 text-muted-foreground" />
+                <select 
+                    className="h-8 text-xs bg-transparent border-none text-muted-foreground hover:text-foreground focus:ring-0 cursor-pointer"
+                    value={lang}
+                    onChange={(e) => setLang(e.target.value as UILanguage)}
+                >
+                    <option value="en">English</option>
+                    <option value="zh-CN">简体中文</option>
+                    <option value="zh-TW">繁體中文</option>
+                    <option value="ar">العربية</option>
+                </select>
+           </div>
         </div>
       </div>
     </header>
