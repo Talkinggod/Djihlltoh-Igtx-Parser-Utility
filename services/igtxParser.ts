@@ -1,5 +1,6 @@
 
 import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis } from '../types';
+import { franc } from 'franc';
 
 const IGTX_VERSION = "1.9.1";
 
@@ -29,7 +30,9 @@ const QUOTE_WRAP_REGEX = /^["'“‘].*["'”’]$/;
 const STANDARD_SENTENCE_REGEX = /^[A-Z].*[.?!]$/;
 const ASCII_REGEX = /^[\x20-\x7E]*$/;
 
-const CLAUSE_BOUNDARY_REGEX = /[,;،؛]/g;
+// Enhanced boundary regex for clause segmentation
+// Includes standard western punctuation, Arabic commas, em-dashes, and pipes (often used in IGT)
+const CLAUSE_BOUNDARY_REGEX = /[,;،؛:—|]/g;
 
 const COMMON_POS_TAGS = new Set([
   'NOM', 'ACC', 'DAT', 'GEN', 'ABL', 'LOC', 'ERG', 'ABS', 
@@ -38,6 +41,24 @@ const COMMON_POS_TAGS = new Set([
   'AUX', 'PRT', 'PL', 'SG', '1SG', '2SG', '3SG', 'SUBJ', 'OBJ',
   'TR', 'INTR', 'M', 'F', 'N'
 ]);
+
+// --- Language Profile Mapping (ISO-639-3 -> Profile) ---
+const LANG_PROFILE_MAP: Record<string, LanguageProfile> = {
+    // Analytic / Isolating
+    'zho': 'analytic', 'yue': 'analytic', 'vie': 'analytic', 
+    'tha': 'analytic', 'mya': 'analytic', 'khm': 'analytic', 
+    'lao': 'analytic',
+    
+    // Morphologically Dense (Semitic, Hamitic, etc)
+    'ara': 'morphological_dense', 'heb': 'morphological_dense', 
+    'amh': 'morphological_dense', 'bod': 'morphological_dense',
+    'som': 'morphological_dense',
+
+    // Polysynthetic / Agglutinative (Americas, Arctic)
+    'kal': 'polysynthetic', 'iku': 'polysynthetic', 
+    'que': 'polysynthetic', 'aym': 'polysynthetic', 
+    'nav': 'polysynthetic', 'ciw': 'polysynthetic' // Ojibwa
+};
 
 /**
  * Simple non-cryptographic hash for provenance tracking (integrity check).
@@ -73,54 +94,105 @@ function analyzeStructure(text: string, profile: LanguageProfile): StructuralAna
 
     const totalChars = tokens.reduce((sum, t) => sum + t.length, 0);
     const avgTokenLength = totalChars / tokenCount;
-    const punctuationCount = (text.match(CLAUSE_BOUNDARY_REGEX) || []).length;
+    
+    const punctuationMatches = text.match(CLAUSE_BOUNDARY_REGEX) || [];
+    const punctuationCount = punctuationMatches.length;
     
     let complexityScore = 0;
     let clauseType: StructuralAnalysis['clauseType'] = 'simple';
 
-    // Heuristic 1: Polysynthetic Chain Clauses
-    // Characteristics: Very long individual words, low word count, internal morphology markers.
+    // --- Metric 1: Segmentation Analysis ---
+    // Split text by boundaries to find "macro-segments"
+    // Filter segments that are too short (e.g., interjections "Oh,") to be full clauses
+    const segments = text.split(CLAUSE_BOUNDARY_REGEX)
+                         .map(s => s.trim())
+                         .filter(s => s.split(/\s+/).length >= 2); 
+    
+    const segmentCount = segments.length;
+
+    // Base complexity from token volume (approx. log scale)
+    if (tokenCount > 7) complexityScore += 0.1;
+    if (tokenCount > 15) complexityScore += 0.1;
+    if (tokenCount > 25) complexityScore += 0.15;
+
+    // --- Metric 2: Profile-Specific Heuristics ---
+
     if (profile === 'polysynthetic' || profile === 'morphological_dense') {
-        if (avgTokenLength > 12) complexityScore += 0.4; // Extremely long words
-        if (avgTokenLength > 18) complexityScore += 0.3; // Holophrastic?
+        const longWords = tokens.filter(t => t.length > 12);
         
-        // A single long word in polysynthetic languages often equals a whole clause in English
-        if (tokenCount < 5 && avgTokenLength > 10) {
+        // Morphological density signals
+        if (avgTokenLength > 8) complexityScore += 0.15;
+        if (longWords.length > 0) complexityScore += (0.1 * longWords.length);
+        
+        // Chain Clause Detection:
+        // 1. Multiple very long words (often holophrastic clauses strung together)
+        // 2. Mix of long words and explicit segmentation
+        if (longWords.length >= 2 || (longWords.length >= 1 && segmentCount >= 2)) {
              clauseType = 'chain_clause';
-             complexityScore += 0.2;
+             complexityScore += 0.3;
+        } 
+        // Single Holophrase (structurally simple but computationally dense)
+        else if (tokenCount < 5 && avgTokenLength > 10) {
+            complexityScore += 0.15; 
         }
     }
-
-    // Heuristic 2: Analytic Compound Clauses
-    // Characteristics: Many small words, frequent punctuation (serial verbs/clauses).
+    
     if (profile === 'analytic' || profile === 'generic') {
-        if (tokenCount > 15) complexityScore += 0.2;
-        if (punctuationCount > 2) {
-            complexityScore += 0.3;
+        // Serial Verb / Compound detection
+        // 1. Explicit coordination via punctuation
+        if (segmentCount >= 2) {
+            complexityScore += (0.15 * segmentCount);
             clauseType = 'compound';
         }
+        
+        // 2. Serial Verb Construction (SVC) heuristic:
+        // Long sequence of relatively short words without punctuation breaks.
+        // (Typical of Sino-Tibetan, Kwa, etc. glosses)
+        if (tokenCount > 12 && punctuationCount === 0 && avgTokenLength < 6) {
+            complexityScore += 0.25;
+            // Differentiate simple long sentence vs multiclausal heuristic
+            if (tokenCount > 18) {
+                clauseType = 'compound'; 
+            }
+        }
     }
 
-    // Heuristic 3: Universal Embedding Signals
-    // Parentheses often denote embedded explanatory clauses in field notes
+    // --- Metric 3: Recursive/Embedded Structures ---
+
+    // Parenthetical Embedding (excluding citations like "(12a)")
     if (text.includes('(') && text.includes(')')) {
-        // But check if it's just a reference like (12a)
-        if (!/^\(\d+[a-z]?\)$/.test(text.trim())) {
-            complexityScore += 0.1;
+        const contentInParens = text.match(/\(([^)]+)\)/)?.[1] || "";
+        const isCitation = /^\d+[a-z]?$/.test(contentInParens.trim());
+        
+        if (!isCitation && contentInParens.split(/\s+/).length > 1) {
+            complexityScore += 0.25;
             clauseType = 'complex_embedded';
         }
     }
 
-    // Normalize Score
-    complexityScore = Math.min(1.0, complexityScore);
+    // Quotative Constructions (e.g., 'He said, "Go away"')
+    const quoteMatches = text.match(/["'“‘](.*?)["'”’]/);
+    if (quoteMatches) {
+        const outsideContent = text.replace(quoteMatches[0], '').trim();
+        // If there is substantial predication outside the quote
+        if (outsideContent.split(/\s+/).length >= 2) {
+             complexityScore += 0.3;
+             clauseType = 'complex_embedded';
+        }
+    }
 
-    // Fallback classification based on score
-    if (complexityScore > 0.6 && clauseType === 'simple') {
-        clauseType = 'complex_embedded';
+    // --- Final Classification & Normalization ---
+    
+    // Cap score
+    complexityScore = Math.min(1.0, parseFloat(complexityScore.toFixed(2)));
+
+    // Promote 'simple' to 'compound' if score is very high (latent complexity)
+    if (complexityScore > 0.75 && clauseType === 'simple') {
+        clauseType = 'compound';
     }
 
     return {
-        complexityScore: parseFloat(complexityScore.toFixed(2)),
+        complexityScore,
         clauseType,
         tokenCount,
         avgTokenLength: parseFloat(avgTokenLength.toFixed(1))
@@ -337,7 +409,32 @@ export function parseIGT(
     pdfDiagnostics?: PdfTextDiagnostics
 ): ParseReport {
   const normalizedText = rawText.normalize('NFC');
-  const tier4Assessment = tier4Check(normalizedText, sourceMetadata.language, pdfDiagnostics);
+  
+  // --- Auto-Detection & Profile Inference Logic ---
+  let detectedLang = sourceMetadata.language;
+  let isAutoDetected = false;
+
+  if ((!detectedLang || detectedLang === 'und' || detectedLang === '') && rawText.length > 0) {
+      // Franc works best with more text, but limiting the sample helps performance
+      const sample = rawText.slice(0, 2000); 
+      const bestGuess = franc(sample);
+      
+      // franc returns 'und' if it can't detect
+      if (bestGuess !== 'und') {
+          detectedLang = bestGuess;
+          isAutoDetected = true;
+      }
+  }
+
+  // Determine the effective profile.
+  // We only switch automatically if the user has selected 'generic' (default)
+  // AND we have a strong language mapping for the detected code.
+  let effectiveProfile = profile;
+  if (profile === 'generic' && detectedLang && LANG_PROFILE_MAP[detectedLang]) {
+      effectiveProfile = LANG_PROFILE_MAP[detectedLang];
+  }
+
+  const tier4Assessment = tier4Check(normalizedText, detectedLang, pdfDiagnostics);
   const rawLines = normalizedText.split(/\r?\n/);
   let blocks: ExtractedBlock[] = [];
   const igtxBlocks: IGTXBlock[] = [];
@@ -349,7 +446,7 @@ export function parseIGT(
       title: sourceMetadata.title || "Untitled Document",
       author: sourceMetadata.author || "Unknown",
       year: sourceMetadata.year || null,
-      language: sourceMetadata.language || "und",
+      language: detectedLang || "und", // Use detected language if available
       orthography: sourceMetadata.orthography || "standard",
       source_type: sourceMetadata.source_type || "legacy_text",
       source_url: sourceMetadata.source_url,
@@ -362,15 +459,16 @@ export function parseIGT(
     const trimmed = line.trim();
     if (!trimmed) return;
 
-    const { score, warnings } = calculateLineConfidence(trimmed, profile);
+    // Use the effective profile for scoring
+    const { score, warnings } = calculateLineConfidence(trimmed, effectiveProfile);
     const THRESHOLD = 0.60; 
 
     if (score >= THRESHOLD) {
       const cleanLine = trimmed.replace(CLEAN_LINE_REGEX, '');
       const blockHash = generateHash(trimmed + index); 
       
-      // NEW: Run structural analysis on the accepted line
-      const structural = analyzeStructure(cleanLine, profile);
+      // NEW: Run structural analysis on the accepted line using effective profile
+      const structural = analyzeStructure(cleanLine, effectiveProfile);
 
       blocks.push({
         id: `blk-${blockHash}`, 
@@ -443,7 +541,8 @@ export function parseIGT(
           version: IGTX_VERSION,
           deterministic: true,
           timestamp: new Date().toISOString(),
-          profile_used: profile,
+          // Record the profile that was actually used (effective profile)
+          profile_used: effectiveProfile,
           unicode_normalization: 'NFC',
           tier4_assessment: {
             requires_tier4: tier4Assessment.requiresTier4,
@@ -460,7 +559,7 @@ export function parseIGT(
     timestamp: new Date().toISOString(),
     fileSource: filename || "raw_input",
     tier4Assessment,
-    profileUsed: profile,
+    profileUsed: effectiveProfile, // Return effective profile
     provenanceHash: docId,
     blockDefinition: "Line-based heuristic extraction unit",
     pdfDiagnostics

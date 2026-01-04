@@ -26,6 +26,7 @@ Instructions:
 4. If audio transcripts are present (e.g. "Listen to text"), include the transcriptions.
 5. FILTER OUT: Navigation menus, footers, sidebars, advertisements, and generic site boilerplate.
 6. FORMAT: Return the text VERBATIM. Preserve line breaks, stanza formatting, and original orthography.
+7. LENGTH LIMIT: Restrict output to approximately 10,000 characters. If content exceeds this, stop at a logical break and append "[TRUNCATED]".
 
 STRICT CONSTRAINT:
 - Do NOT summarize.

@@ -230,17 +230,20 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
           textLayerDiv.innerHTML = ''; 
           textLayerDiv.style.setProperty('--scale-factor', `${scale}`);
           
+          // Import renderTextLayer - handling both named export and default export scenarios
           const renderTextLayer = 
             (pdfjsModule as any).renderTextLayer || 
             (pdfjsLib as any).renderTextLayer;
 
           if (typeof renderTextLayer === 'function') {
             textLayerRenderTask = renderTextLayer({
-              textContentSource: textContent,
+              textContent: textContent,
               container: textLayerDiv,
               viewport: viewport
             });
             await textLayerRenderTask.promise;
+          } else {
+             console.warn("renderTextLayer not found in pdfjs-dist module");
           }
         }
 
