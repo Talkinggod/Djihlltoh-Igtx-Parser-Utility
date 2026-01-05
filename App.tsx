@@ -13,6 +13,7 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [profile, setProfile] = useState<LanguageProfile>('generic');
   const [lang, setLang] = useState<UILanguage>('en');
+  const [apiKey, setApiKey] = useState<string>('');
 
   const handleProcess = (sourceMeta: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics) => {
     if (!input.trim()) return;
@@ -38,7 +39,7 @@ function App() {
       className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20 selection:text-primary overflow-x-hidden"
       dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
-      <Header lang={lang} setLang={setLang} />
+      <Header lang={lang} setLang={setLang} apiKey={apiKey} setApiKey={setApiKey} />
       
       <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6 items-start justify-center">
         
@@ -52,6 +53,7 @@ function App() {
             profile={profile}
             setProfile={setProfile}
             lang={lang}
+            apiKey={apiKey}
           />
         </div>
 
@@ -68,7 +70,8 @@ function App() {
           <OutputSection 
             report={report} 
             onUpdateReport={setReport}
-            lang={lang} 
+            lang={lang}
+            apiKey={apiKey}
           />
         </div>
 

@@ -16,9 +16,10 @@ interface OutputSectionProps {
   report: ParseReport | null;
   onUpdateReport?: (report: ParseReport) => void;
   lang: UILanguage;
+  apiKey: string;
 }
 
-export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateReport, lang }) => {
+export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateReport, lang, apiKey }) => {
   const [activeTab, setActiveTab] = useState<string>("editor");
   const [copied, setCopied] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -84,15 +85,22 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
 
   const handleAiEnrichment = async () => {
       if (!report || !onUpdateReport) return;
+      
+      if (!apiKey || apiKey.trim() === '') {
+          alert('API Key Required: Please enter your Gemini API key in the header (top-right corner) to use AI enrichment.');
+          return;
+      }
+      
       setIsEnriching(true);
       setEnrichmentProgress(0);
       try {
           const enrichedReport = await enrichReportWithSemantics(report, (processed, total) => {
               setEnrichmentProgress(Math.round((processed / total) * 100));
-          });
+          }, apiKey);
           onUpdateReport(enrichedReport);
-      } catch (e) {
+      } catch (e: any) {
           console.error("Enrichment failed", e);
+          alert(`Enrichment failed: ${e.message || 'Unknown error'}`);
       } finally {
           setIsEnriching(false);
       }

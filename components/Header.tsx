@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Layers, Terminal, ShieldCheck, Globe } from 'lucide-react';
+import { Layers, Terminal, ShieldCheck, Globe, Key, Eye, EyeOff, Check } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { translations } from '../services/translations';
@@ -9,10 +9,13 @@ import { UILanguage } from '../types';
 interface HeaderProps {
     lang: UILanguage;
     setLang: (l: UILanguage) => void;
+    apiKey: string;
+    setApiKey: (key: string) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ lang, setLang }) => {
+export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey }) => {
   const [imageError, setImageError] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const logoSrc = "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg";
   const t = translations[lang];
 
@@ -60,6 +63,35 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang }) => {
              v1.9
            </Badge>
 
+           <div className="w-px h-6 bg-border hidden sm:block"></div>
+           
+           {/* API Key Input */}
+           <div className="relative group" title="Enter your Gemini API key for AI features">
+               <div className="flex items-center gap-1 h-8 px-2 rounded-md border border-input bg-background hover:border-primary/50 transition-colors">
+                   <Key className={`w-3.5 h-3.5 ${apiKey ? 'text-emerald-500' : 'text-muted-foreground'}`} />
+                   <input
+                       type={showApiKey ? "text" : "password"}
+                       placeholder="API Key"
+                       className="w-20 md:w-32 bg-transparent text-xs focus:outline-none text-foreground placeholder:text-muted-foreground"
+                       value={apiKey}
+                       onChange={(e) => setApiKey(e.target.value)}
+                   />
+                   <button
+                       type="button"
+                       onClick={() => setShowApiKey(!showApiKey)}
+                       className="text-muted-foreground hover:text-foreground transition-colors"
+                   >
+                       {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                   </button>
+                   {apiKey && (
+                       <Check className="w-3 h-3 text-emerald-500" />
+                   )}
+               </div>
+               <div className="absolute right-0 top-full mt-1 w-48 bg-popover border border-border rounded-md p-2 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg">
+                   Enter your Gemini API key for AI features
+               </div>
+           </div>
+           
            <div className="w-px h-6 bg-border hidden sm:block"></div>
            
            <div className="flex items-center gap-1">

@@ -2,13 +2,18 @@
 import { GoogleGenAI } from "@google/genai";
 import { IGTXSource } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 /**
  * Scrapes linguistic text content from a URL using Gemini Search Grounding.
  * This effectively acts as a semantic proxy for client-side ingestion.
  */
-export async function scrapeUrlViaGemini(url: string): Promise<{ text: string, metadata: Partial<IGTXSource> }> {
+export async function scrapeUrlViaGemini(url: string, apiKey: string): Promise<{ text: string, metadata: Partial<IGTXSource> }> {
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error('API key is required for URL scraping');
+  }
+
+  // Initialize the client with the provided API key
+  const ai = new GoogleGenAI({ apiKey });
+
   // Upgraded to Pro for better context understanding and search synthesis
   const model = 'gemini-3-pro-preview'; 
 
