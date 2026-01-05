@@ -2,9 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ParseReport, IGTXBlock } from "../types";
 
-// Initialize the client with the environment variable
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 const BATCH_SIZE = 5;
 
 /**
@@ -13,8 +10,16 @@ const BATCH_SIZE = 5;
  */
 export async function enrichReportWithSemantics(
   report: ParseReport, 
-  onProgress: (processed: number, total: number) => void
+  onProgress: (processed: number, total: number) => void,
+  apiKey?: string
 ): Promise<ParseReport> {
+    if (!apiKey) {
+        console.warn("No API key provided for enrichment");
+        return report; // Return unchanged if no key
+    }
+    
+    const ai = new GoogleGenAI({ apiKey });
+    
     const totalBlocks = report.blocks.length;
     let processed = 0;
     
@@ -28,7 +33,7 @@ export async function enrichReportWithSemantics(
         const currentBatch = enrichedBlocks.slice(i, batchEnd);
         
         try {
-            const enrichedBatch = await processBatch(currentBatch);
+            const enrichedBatch = await processBatch(currentBatch, ai);
             
             // Update the main arrays
             for (let j = 0; j < enrichedBatch.length; j++) {
@@ -79,7 +84,7 @@ export async function enrichReportWithSemantics(
     };
 }
 
-async function processBatch(blocks: any[]): Promise<any[]> {
+async function processBatch(blocks: any[], ai: any): Promise<any[]> {
     // CRITICAL GUARDRAIL: Only send clean_text (L1), block_id, and position.
     // Do NOT send rawSource, OCR diagnostics, or rejected lines to prevent hallucination 
     // based on noisy glosses or layout artifacts.
