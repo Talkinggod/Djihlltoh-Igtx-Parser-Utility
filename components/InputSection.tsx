@@ -20,10 +20,11 @@ interface InputSectionProps {
   profile: LanguageProfile;
   setProfile: (val: LanguageProfile) => void;
   lang: UILanguage;
+  apiKey: string;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ 
-    input, setInput, onProcess, onClear, profile, setProfile, lang
+    input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -126,11 +127,18 @@ export const InputSection: React.FC<InputSectionProps> = ({
 
   const handleUrlFetch = async () => {
     if (!urlInput) return;
+    
+    if (!apiKey || apiKey.trim() === '') {
+      setInput(`[SYSTEM WARNING]: API Key Required\n----------------------------------------\nThe URL scraping feature requires a Gemini API key.\n\nPlease enter your API key in the header (top-right corner) to use this feature.`);
+      setActiveTab("input");
+      return;
+    }
+    
     setIsScraping(true);
     setLoadingStatus("Scraping content via Gemini Pro..."); 
     
     try {
-        const { text, metadata } = await scrapeUrlViaGemini(urlInput);
+        const { text, metadata } = await scrapeUrlViaGemini(urlInput, apiKey);
         
         if (!text || text.trim().length === 0) {
              setInput(`[SYSTEM WARNING]: The AI could not retrieve sufficient content from this URL.\n\nReason: The page content may not be fully indexed by Google Search, or it requires direct browsing (which is restricted).\n\nAction: Please Copy & Paste the text manually from ${urlInput} into this editor.`);
