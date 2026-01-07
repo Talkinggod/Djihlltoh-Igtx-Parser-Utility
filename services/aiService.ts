@@ -1,12 +1,12 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ParseReport, IGTXBlock } from "../types";
+import { ParseReport, ParserDomain } from "../types";
 
 const BATCH_SIZE = 5;
 
 /**
  * Enriches the ParseReport with Semantic State (Stage 2/3) data using Gemini.
- * This process is post-hoc and does not alter the deterministic Stage 1 output.
+ * Supports both Linguistic Predicate Extraction and Legal Entity Extraction.
  */
 export async function enrichReportWithSemantics(
   report: ParseReport,
@@ -17,34 +17,31 @@ export async function enrichReportWithSemantics(
         throw new Error("Gemini API Key is missing. Please enter it in the header.");
     }
 
+    const domain = report.metadata.domain;
     const totalBlocks = report.blocks.length;
     let processed = 0;
     
-    // Deep copy blocks to avoid mutation issues during processing
     const enrichedBlocks = [...report.blocks];
     const enrichedIgtxBlocks = [...report.igtxDocument.blocks];
 
-    // Process in batches to respect rate limits and context windows
     for (let i = 0; i < totalBlocks; i += BATCH_SIZE) {
         const batchEnd = Math.min(i + BATCH_SIZE, totalBlocks);
         const currentBatch = enrichedBlocks.slice(i, batchEnd);
         
         try {
-            const enrichedBatch = await processBatch(currentBatch, apiKey);
+            const enrichedBatch = await processBatch(currentBatch, apiKey, domain);
             
-            // Update the main arrays
             for (let j = 0; j < enrichedBatch.length; j++) {
                 const globalIndex = i + j;
                 enrichedBlocks[globalIndex] = enrichedBatch[j];
                 
-                // Sync with IGTX Document structure
                 if (enrichedIgtxBlocks[globalIndex]) {
                     enrichedIgtxBlocks[globalIndex] = {
                         ...enrichedIgtxBlocks[globalIndex],
-                        semantic_state: enrichedBatch[j].semantic_state as any, // Cast to match IGTX structure
-                        // We also add a trace that AI was used for this block in the integrity check
+                        semantic_state: enrichedBatch[j].semantic_state,
+                        legal_state: enrichedBatch[j].legal_state,
                         integrity: {
-                            ...enrichedIgtxBlocks[globalIndex].integrity, // preservation
+                            ...enrichedIgtxBlocks[globalIndex].integrity,
                             ai_enrichment: "gemini-3-pro-preview" 
                         } as any
                     };
@@ -52,7 +49,6 @@ export async function enrichReportWithSemantics(
             }
         } catch (error) {
             console.error(`Batch processing failed for indices ${i}-${batchEnd}:`, error);
-            // We continue processing other batches even if one fails
         }
 
         processed += (batchEnd - i);
@@ -67,10 +63,8 @@ export async function enrichReportWithSemantics(
             blocks: enrichedIgtxBlocks,
             processing: {
                 ...report.igtxDocument.processing,
-                // Append AI metadata to the document processing log
                 tier4_assessment: {
                     ...report.igtxDocument.processing.tier4_assessment,
-                    // We append a note about Stage 2
                     stage2_enrichment: {
                         model: "gemini-3-pro-preview",
                         timestamp: new Date().toISOString()
@@ -81,67 +75,96 @@ export async function enrichReportWithSemantics(
     };
 }
 
-async function processBatch(blocks: any[], apiKey: string): Promise<any[]> {
-    // Initialize the client with the provided key
+async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain): Promise<any[]> {
     const ai = new GoogleGenAI({ apiKey });
 
-    // CRITICAL GUARDRAIL: Only send clean_text (L1), block_id, and position.
-    // Do NOT send rawSource, OCR diagnostics, or rejected lines to prevent hallucination 
-    // based on noisy glosses or layout artifacts.
     const promptContext = blocks.map((b, idx) => 
         `Block ID: ${b.id}\nPosition: ${b.lineNumber}\nText: "${b.extractedLanguageLine}"`
     ).join("\n\n---\n\n");
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `You are a specialized linguistic analyzer for Interlinear Glossed Text (IGT).
-        
-        Your task is to populate the 'semantic_state' for the provided text blocks.
-        Identify the main 'predicate' (verb/root), 'arguments' (semantic roles), and grammatical features based ONLY on the provided text.
-        
-        Input Blocks:
-        ${promptContext}
-        
-        Return a JSON object containing an array 'results' where each item corresponds to the input blocks in order.`,
-        config: {
-            temperature: 0, // Enforce deterministic behavior for scientific reproducibility
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    results: {
-                        type: Type.ARRAY,
-                        items: {
+    const systemInstruction = domain === 'legal'
+       ? `You are an expert Legal Assistant specializing in analyzing court pleadings. Extract key legal entities.`
+       : `You are a specialized linguistic analyzer for Interlinear Glossed Text (IGT). Identify predicates and arguments.`;
+
+    const linguisticSchema = {
+        type: Type.OBJECT,
+        properties: {
+            results: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        predicate: { type: Type.STRING, nullable: true },
+                        arguments: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        features: {
                             type: Type.OBJECT,
                             properties: {
-                                predicate: { type: Type.STRING, nullable: true, description: "The semantic head/predicate of the clause" },
-                                arguments: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of semantic arguments identified" },
-                                features: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        tense: { type: Type.STRING, nullable: true },
-                                        aspect: { type: Type.STRING, nullable: true },
-                                        modality: { type: Type.STRING, nullable: true },
-                                        polarity: { type: Type.STRING, nullable: true }
-                                    }
-                                }
+                                tense: { type: Type.STRING, nullable: true },
+                                aspect: { type: Type.STRING, nullable: true },
+                                modality: { type: Type.STRING, nullable: true },
+                                polarity: { type: Type.STRING, nullable: true }
                             }
                         }
                     }
                 }
             }
         }
+    };
+
+    const legalSchema = {
+        type: Type.OBJECT,
+        properties: {
+            results: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        parties: { 
+                            type: Type.ARRAY, 
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    role: { type: Type.STRING, description: "Plaintiff, Defendant, Judge, etc." },
+                                    name: { type: Type.STRING }
+                                }
+                            }
+                        },
+                        case_meta: {
+                            type: Type.OBJECT,
+                            properties: {
+                                index_number: { type: Type.STRING, nullable: true },
+                                court: { type: Type.STRING, nullable: true },
+                                doc_type: { type: Type.STRING, nullable: true }
+                            }
+                        },
+                        legal_points: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key legal arguments or principles in this block" }
+                    }
+                }
+            }
+        }
+    };
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: `Input Blocks:
+        ${promptContext}
+        
+        Return a JSON object containing an array 'results' matching the schema.`,
+        config: {
+            temperature: 0,
+            systemInstruction: systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: domain === 'legal' ? legalSchema : linguisticSchema
+        }
     });
 
     let rawText = response.text || "{\"results\": []}";
-    // Cleanup potential Markdown code fences which might slip through despite MIME type
     rawText = rawText.replace(/```json\n?|```/g, '').trim();
 
     let json;
     try {
         json = JSON.parse(rawText);
     } catch (e) {
-        console.error("Failed to parse JSON from AI response", rawText);
         json = { results: [] };
     }
 
@@ -149,32 +172,29 @@ async function processBatch(blocks: any[], apiKey: string): Promise<any[]> {
     const timestamp = new Date().toISOString();
     const modelVersion = "gemini-3-pro-preview";
 
-    // Merge results back into blocks
     return blocks.map((block, idx) => {
         const result = results[idx] || {};
         
-        // Guardrail: Ensure structure exists even if AI returned partial data
-        const semanticData = {
-            predicate: result.predicate || null,
-            arguments: result.arguments || [],
-            features: result.features || {
-                tense: null, aspect: null, modality: null, polarity: null
-            },
-            // CRITICAL GUARDRAIL: Explicit AI Provenance Injection
-            provenance: {
-                source: 'ai',
-                model: modelVersion,
-                generated_at: timestamp
-            }
-        };
-
-        return {
-            ...block,
-            tier4: {
-                ...block.tier4,
-            },
-            // This is the key update: filling the previously null semantic_state
-            semantic_state: semanticData
-        };
+        if (domain === 'legal') {
+            return {
+                ...block,
+                legal_state: {
+                    parties: result.parties || [],
+                    case_meta: result.case_meta || { index_number: null, court: null, doc_type: null },
+                    legal_points: result.legal_points || [],
+                    provenance: { source: 'ai', model: modelVersion, generated_at: timestamp }
+                }
+            };
+        } else {
+            return {
+                ...block,
+                semantic_state: {
+                    predicate: result.predicate || null,
+                    arguments: result.arguments || [],
+                    features: result.features || { tense: null, aspect: null, modality: null, polarity: null },
+                    provenance: { source: 'ai', model: modelVersion, generated_at: timestamp }
+                }
+            };
+        }
     });
 }

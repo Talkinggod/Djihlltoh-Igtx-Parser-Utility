@@ -1,25 +1,28 @@
+
 import React, { useState } from 'react';
-import { Layers, Terminal, ShieldCheck, Globe, Key, Check, XCircle, Eye, EyeOff, Copy, X } from 'lucide-react';
+import { Layers, Terminal, ShieldCheck, Globe, Key, Check, XCircle, Eye, EyeOff, Copy, X, Scale, Library } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { translations } from '../services/translations';
-import { UILanguage } from '../types';
+import { UILanguage, ParserDomain } from '../types';
 
 interface HeaderProps {
     lang: UILanguage;
     setLang: (l: UILanguage) => void;
     apiKey: string;
     setApiKey: (key: string) => void;
+    domain: ParserDomain;
+    setDomain: (d: ParserDomain) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey }) => {
+export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey, domain, setDomain }) => {
   const [imageError, setImageError] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const logoSrc = "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg";
   const t = translations[lang];
 
-  // Validation: Starts with AIza and has sufficient length (Google keys are usually ~39 chars)
+  // Validation
   const isPotentiallyValid = apiKey.startsWith('AIza') && apiKey.length > 35;
   const isInvalid = apiKey.length > 0 && !isPotentiallyValid;
 
@@ -37,7 +40,7 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
       <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between relative">
         
-        {/* Left Side - Logo & Title (Moved from Center) */}
+        {/* Left Side - Logo, Title & Domain Toggle */}
         <div className="flex items-center gap-4 z-20 shrink-0">
           <div className="relative h-10 w-10 md:h-12 md:w-12 rounded-full border-2 border-primary/20 overflow-hidden shadow-sm hover:border-primary/40 transition-colors bg-muted group">
             {!imageError ? (
@@ -55,12 +58,36 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
           </div>
 
           <div className="flex flex-col justify-center">
-            <h1 className="text-sm md:text-lg font-bold tracking-tight leading-tight">
-              {t.title}
+            <h1 className="text-sm md:text-lg font-bold tracking-tight leading-tight flex items-center gap-2">
+              {domain === 'legal' ? 'Dziłtǫ́ǫ́ Legal Studio' : t.title}
             </h1>
             <p className="text-[10px] text-muted-foreground font-mono hidden md:block whitespace-nowrap">
               {t.subtitle}
             </p>
+          </div>
+
+          {/* Domain Toggle - Moved here from center to avoid overlap */}
+          <div className="hidden lg:flex ml-6 bg-muted/30 p-1 rounded-lg border border-border">
+                <button
+                    onClick={() => setDomain('linguistic')}
+                    className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200",
+                        domain === 'linguistic' ? "bg-background shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
+                    )}
+                >
+                    <Library className="w-3.5 h-3.5" />
+                    Linguistics
+                </button>
+                <button
+                    onClick={() => setDomain('legal')}
+                    className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200",
+                        domain === 'legal' ? "bg-background shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
+                    )}
+                >
+                    <Scale className="w-3.5 h-3.5" />
+                    Legal Pleading
+                </button>
           </div>
         </div>
 
@@ -98,7 +125,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
               />
 
               <div className="flex items-center gap-0.5">
-                  {/* Show/Hide */}
                   <Button 
                     variant="ghost" 
                     size="icon" 
@@ -109,7 +135,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
                     {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                   </Button>
 
-                  {/* Copy */}
                   {apiKey && (
                     <Button 
                         variant="ghost" 
@@ -122,7 +147,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
                     </Button>
                   )}
 
-                  {/* Clear */}
                   {apiKey && (
                     <Button 
                         variant="ghost" 
@@ -135,18 +159,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
                     </Button>
                   )}
               </div>
-              
-              {/* Tooltip on hover */}
-              <div className="absolute right-0 top-full mt-3 w-64 p-3 bg-popover text-popover-foreground text-[10px] rounded-md border shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none group-hover:pointer-events-auto">
-                  <div className="font-semibold mb-1">Gemini API Key Required</div>
-                  <div className="text-muted-foreground leading-relaxed">
-                    Used for URL scraping and AI enrichment. Stored temporarily in session.
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <span className="text-muted-foreground">Format: </span> 
-                    <code className="bg-muted px-1 rounded">AIza...</code>
-                  </div>
-              </div>
            </div>
 
            <Badge variant="outline" className="hidden lg:flex gap-1.5 border-emerald-900/50 bg-emerald-950/20 text-emerald-500">
@@ -154,11 +166,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
              {t.deterministic}
            </Badge>
            
-           <Badge variant="secondary" className="hidden md:flex gap-1.5 font-mono">
-             <Terminal className="w-3 h-3" />
-             v1.9
-           </Badge>
-
            <div className="w-px h-6 bg-border hidden sm:block"></div>
            
            <div className="flex items-center gap-1">

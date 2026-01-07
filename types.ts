@@ -1,5 +1,15 @@
 
-export type LanguageProfile = 'generic' | 'polysynthetic' | 'analytic' | 'morphological_dense';
+export type ParserDomain = 'linguistic' | 'legal';
+
+export type LanguageProfile = 
+  | 'generic' 
+  | 'polysynthetic' 
+  | 'analytic' 
+  | 'morphological_dense'
+  // Legal Profiles
+  | 'legal_pleading'
+  | 'legal_contract'
+  | 'legal_statute';
 
 export type UILanguage = 'en' | 'zh-CN' | 'zh-TW' | 'ar';
 
@@ -14,7 +24,7 @@ export interface PdfTextDiagnostics {
 }
 
 export interface Tier4Signal {
-  feature: 'orthographic_complexity' | 'morpheme_density' | 'gloss_interaction' | 'metadata_context' | 'layout_structure';
+  feature: 'orthographic_complexity' | 'morpheme_density' | 'gloss_interaction' | 'metadata_context' | 'layout_structure' | 'legal_header' | 'legal_citation';
   weight: number;
   description: string;
 }
@@ -33,6 +43,7 @@ export interface ParserMetadata {
   fileSource?: string;
   tier4Assessment?: Tier4Assessment;
   profileUsed: LanguageProfile;
+  domain: ParserDomain;
   provenanceHash: string; 
   blockDefinition: string; 
   pdfDiagnostics?: PdfTextDiagnostics;
@@ -45,6 +56,7 @@ export interface StructuralAnalysis {
     avgTokenLength: number;
 }
 
+// Linguistic State
 export interface SemanticState {
   provenance?: {
     source: 'ai' | 'human';
@@ -61,6 +73,22 @@ export interface SemanticState {
   };
 }
 
+// Legal State
+export interface LegalState {
+  provenance?: {
+    source: 'ai' | 'human';
+    model: string;
+    generated_at: string;
+  };
+  parties: { role: string; name: string }[];
+  case_meta: {
+    index_number: string | null;
+    court: string | null;
+    doc_type: string | null;
+  };
+  legal_points: string[];
+}
+
 export interface ExtractedBlock {
   id: string;
   rawSource: string;
@@ -74,7 +102,8 @@ export interface ExtractedBlock {
     warnings: string[];
   };
   structural?: StructuralAnalysis;
-  semantic_state?: SemanticState;
+  semantic_state?: SemanticState; // Linguistic Mode
+  legal_state?: LegalState;       // Legal Mode
 }
 
 export interface ParseReport {
@@ -118,6 +147,7 @@ export interface IGTXProcessingInfo {
   deterministic: boolean;
   timestamp: string;
   profile_used: LanguageProfile;
+  domain: ParserDomain;
   unicode_normalization: 'NFC' | 'NFD' | 'None';
   tier4_assessment?: {
     requires_tier4: boolean;
@@ -136,7 +166,7 @@ export interface IGTXBlock {
   raw_text: string;
   clean_text: string;
   segmentation: {
-    type: 'clause' | 'sentence' | 'discourse_unit';
+    type: 'clause' | 'sentence' | 'discourse_unit' | 'legal_paragraph';
     confidence: number;
   };
   igt: {
@@ -146,7 +176,9 @@ export interface IGTXBlock {
     translation: string | null;
   };
   // Stage 3: Semantic Normalization (Placeholders for downstream tools)
-  semantic_state: SemanticState;
+  semantic_state?: SemanticState;
+  legal_state?: LegalState;
+  
   // Stage 4: Vector Projection (Placeholders)
   vector_state: {
     embedding: number[] | null; 

@@ -1,7 +1,7 @@
 
 import React, { useRef, useState } from 'react';
-import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle } from 'lucide-react';
-import { Card, CardHeader, CardContent, CardFooter, CardTitle, CardDescription } from './ui/card';
+import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel } from 'lucide-react';
+import { Card, CardHeader, CardFooter, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
@@ -9,7 +9,7 @@ import { cn } from '../lib/utils';
 import { extractTextFromPdf } from '../services/pdfExtractor';
 import { scrapeUrlViaGemini } from '../services/webScraper';
 import { PdfViewer } from './PdfViewer';
-import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics } from '../types';
+import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain } from '../types';
 import { translations } from '../services/translations';
 
 interface InputSectionProps {
@@ -21,10 +21,11 @@ interface InputSectionProps {
   setProfile: (val: LanguageProfile) => void;
   lang: UILanguage;
   apiKey: string;
+  domain: ParserDomain;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ 
-    input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey
+    input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey, domain
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -127,7 +128,6 @@ export const InputSection: React.FC<InputSectionProps> = ({
 
   const handleUrlFetch = async () => {
     if (!urlInput) return;
-    
     if (!apiKey) {
         setInput(`[SYSTEM ERROR]: API Key Missing\n----------------------------------------\nPlease enter your Gemini API Key in the top header to use URL scraping.`);
         setActiveTab("input");
@@ -135,22 +135,20 @@ export const InputSection: React.FC<InputSectionProps> = ({
     }
 
     setIsScraping(true);
-    setLoadingStatus("Scraping content via Gemini Pro..."); 
+    setLoadingStatus(domain === 'legal' ? "Fetching court records..." : "Scraping content via Gemini Pro..."); 
     
     try {
         const { text, metadata } = await scrapeUrlViaGemini(urlInput, apiKey);
-        
         if (!text || text.trim().length === 0) {
              setInput(`[SYSTEM WARNING]: The AI could not retrieve sufficient content from this URL.\n\nReason: The page content may not be fully indexed by Google Search, or it requires direct browsing (which is restricted).\n\nAction: Please Copy & Paste the text manually from ${urlInput} into this editor.`);
              setActiveTab("input");
              return;
         }
-
         setInput(text);
         setSourceMeta(prev => ({
             ...prev,
             ...metadata,
-            title: urlInput // Use URL as title default
+            title: urlInput
         }));
         setActiveTab("input");
     } catch (e: any) {
@@ -177,10 +175,11 @@ export const InputSection: React.FC<InputSectionProps> = ({
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg flex items-center gap-2">
-                {t.input_title}
+                {domain === 'legal' ? <Gavel className="w-5 h-5 text-primary" /> : null}
+                {domain === 'legal' ? "Document Source" : t.input_title}
                 <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground font-normal hidden sm:inline-flex">{t.stage0}</Badge>
             </CardTitle>
-            <CardDescription>{t.input_desc}</CardDescription>
+            <CardDescription>{domain === 'legal' ? "Upload pleadings, affidavits, or contracts for analysis." : t.input_desc}</CardDescription>
           </div>
           {input && (
             <Button variant="ghost" size="sm" onClick={clearAll} className="h-8 w-8 p-0">
@@ -220,10 +219,20 @@ export const InputSection: React.FC<InputSectionProps> = ({
                     value={profile}
                     onChange={(e) => setProfile(e.target.value as LanguageProfile)}
                 >
-                    <option value="generic">Generic (General-Purpose)</option>
-                    <option value="polysynthetic">Polysynthetic (Complex)</option>
-                    <option value="analytic">Analytic / Isolating</option>
-                    <option value="morphological_dense">Morphologically Dense</option>
+                    {domain === 'linguistic' ? (
+                        <>
+                            <option value="generic">Generic (General-Purpose)</option>
+                            <option value="polysynthetic">Polysynthetic (Complex)</option>
+                            <option value="analytic">Analytic / Isolating</option>
+                            <option value="morphological_dense">Morphologically Dense</option>
+                        </>
+                    ) : (
+                        <>
+                            <option value="legal_pleading">Court Pleading / Motion</option>
+                            <option value="legal_contract">Contract / Agreement</option>
+                            <option value="legal_statute">Statute / Regulation</option>
+                        </>
+                    )}
                 </select>
              </div>
            </div>
@@ -232,7 +241,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
            <div className="bg-primary/5 px-4 py-1.5 border-b border-primary/10 flex items-center gap-2">
                 <Info className="w-3 h-3 text-primary/70 shrink-0" />
                 <span className="text-[10px] text-primary/80 font-medium">
-                    {t.profile_disclaimer}
+                    {domain === 'legal' 
+                        ? "Legal Mode active: Optimized for finding captions, index numbers, and parties." 
+                        : t.profile_disclaimer}
                 </span>
            </div>
 
@@ -244,8 +255,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
               >
                   <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground group-hover:text-primary transition-colors">
                       <BookOpen className="w-3.5 h-3.5" />
-                      <span>{t.metadata_label}</span>
-                      {(!sourceMeta.title && !sourceMeta.language) && <span className="text-[10px] text-amber-500 font-normal">{t.metadata_tip}</span>}
+                      <span>{domain === 'legal' ? "Docket Metadata" : t.metadata_label}</span>
                   </div>
                   {showMetadata ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
               </div>
@@ -254,43 +264,18 @@ export const InputSection: React.FC<InputSectionProps> = ({
                   <div className="mt-3 grid grid-cols-2 gap-3 pb-2 animate-in slide-in-from-top-2 duration-200">
                       <input 
                         type="text" 
-                        placeholder={t.ph_title}
+                        placeholder={domain === 'legal' ? "Case Name / Title" : t.ph_title}
                         className="col-span-2 h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         value={sourceMeta.title || ""}
                         onChange={(e) => setSourceMeta({...sourceMeta, title: e.target.value})}
                       />
                       <input 
                         type="text" 
-                        placeholder={t.ph_author}
+                        placeholder={domain === 'legal' ? "Judge / Attorney" : t.ph_author}
                         className="h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         value={sourceMeta.author || ""}
                         onChange={(e) => setSourceMeta({...sourceMeta, author: e.target.value})}
                       />
-                      <input 
-                        type="text" 
-                        placeholder={t.ph_lang} 
-                        className="h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        value={sourceMeta.language || ""}
-                        onChange={(e) => setSourceMeta({...sourceMeta, language: e.target.value})}
-                      />
-                      <input 
-                        type="number" 
-                        placeholder={t.ph_year}
-                        className="h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        value={sourceMeta.year || ""}
-                        onChange={(e) => setSourceMeta({...sourceMeta, year: parseInt(e.target.value) || null})}
-                      />
-                       <select 
-                        className="h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-muted-foreground"
-                        value={sourceMeta.source_type || "legacy_text"}
-                        onChange={(e) => setSourceMeta({...sourceMeta, source_type: e.target.value as any})}
-                       >
-                           <option value="legacy_text">Legacy Text</option>
-                           <option value="field_notes">Field Notes</option>
-                           <option value="pdf">PDF Extraction</option>
-                           <option value="scan">Scan / OCR</option>
-                           <option value="web_scrape">Web URL</option>
-                       </select>
                   </div>
               )}
            </div>
@@ -303,7 +288,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                       "w-full h-full bg-transparent p-6 text-sm font-mono text-foreground resize-none focus:outline-none leading-relaxed placeholder:text-muted-foreground/50 whitespace-pre overflow-auto",
                       (isLoadingFile || isScraping) && "opacity-50"
                     )}
-                    placeholder={isLoadingFile ? "Reading file..." : (isScraping ? "Fetching content..." : "// Paste your raw IGT text here...\n// Select 'Analytic' or 'Morphologically Dense' above for specialized profiles.")}
+                    placeholder={isLoadingFile ? "Reading file..." : (isScraping ? "Fetching content..." : (domain === 'legal' ? "// Paste Affidavit, Brief, or Complaint here..." : "// Paste your raw IGT text here..."))}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     spellCheck={false}
@@ -330,10 +315,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
              <TabsContent value="url" className="absolute inset-0 m-0 p-6 flex flex-col items-center justify-center gap-4 bg-muted/5">
                 <div className="max-w-md w-full space-y-4">
                     <div className="text-center space-y-2">
-                        <Globe className="w-10 h-10 mx-auto text-primary/20" />
+                        {domain === 'legal' ? <Scale className="w-10 h-10 mx-auto text-primary/20" /> : <Globe className="w-10 h-10 mx-auto text-primary/20" />}
                         <h3 className="text-lg font-medium">{t.tab_url}</h3>
                         <p className="text-xs text-muted-foreground">
-                            Import linguistic texts directly from web pages using Gemini Semantic Search.
+                            {domain === 'legal' 
+                              ? "Scrape public court documents or case text via search." 
+                              : "Import linguistic texts directly from web pages using Gemini Semantic Search."}
                         </p>
                     </div>
                     
@@ -353,22 +340,6 @@ export const InputSection: React.FC<InputSectionProps> = ({
                             {isScraping ? <Loader2 className="w-4 h-4 animate-spin" /> : t.btn_fetch}
                         </Button>
                     </div>
-                    
-                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-md p-3 text-[11px] text-amber-600/80">
-                        <span className="font-semibold block mb-1 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3"/> Note on Voice & Retrieval:
-                        </span>
-                        This tool extracts text and transcripts via search. Direct audio files cannot be scraped by browser security policies. If extraction fails, please manually Copy & Paste content.
-                    </div>
-                    
-                    {!apiKey && (
-                         <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3 text-[11px] text-destructive/80">
-                            <span className="font-semibold block mb-1">
-                                API Key Required
-                            </span>
-                            Please enter your Gemini API Key in the top header to enable this feature.
-                        </div>
-                    )}
                 </div>
              </TabsContent>
 
@@ -423,7 +394,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
           className="shadow-lg shadow-primary/20"
         >
           <RefreshCw className={cn("w-3.5 h-3.5 ltr:mr-2 rtl:ml-2", (isLoadingFile || isScraping) ? "animate-spin" : "")} />
-          {t.btn_extract}
+          {domain === 'legal' ? "Analyze Pleading" : t.btn_extract}
         </Button>
       </CardFooter>
     </Card>
