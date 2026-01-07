@@ -1,15 +1,8 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import * as pdfjsModule from 'pdfjs-dist';
-import { Loader2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Loader2, ZoomIn, ZoomOut, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
-
-// Initialize PDF.js worker
-const pdfjsLib = (pdfjsModule as any).default || pdfjsModule;
-if (pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-}
 
 // Optimized CSS for text selection and alignment
 const textLayerStyles = `
@@ -47,15 +40,46 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file }) => {
   const [pdfDocument, setPdfDocument] = useState<any>(null);
   const [numPages, setNumPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1.2);
+  const [pdfLib, setPdfLib] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let active = true;
+
+    const initPdfEngine = async () => {
+      try {
+        // Dynamic import
+        // @ts-ignore
+        const pdfjsModule = await import('pdfjs-dist');
+        const lib = pdfjsModule.default || pdfjsModule;
+        
+        if (active) {
+          if (lib.GlobalWorkerOptions && !lib.GlobalWorkerOptions.workerSrc) {
+            lib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+          }
+          setPdfLib(lib);
+        }
+      } catch (e: any) {
+        if (active) setError("Could not load PDF Engine: " + e.message);
+      }
+    };
+
+    initPdfEngine();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!pdfLib || !file) return;
+
     const loadPdf = async () => {
       setIsLoading(true);
+      setError(null);
+      
       try {
         const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({
+        const loadingTask = pdfLib.getDocument({
           data: arrayBuffer,
           cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
           cMapPacked: true,
@@ -64,20 +88,28 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file }) => {
         const pdf = await loadingTask.promise;
         setPdfDocument(pdf);
         setNumPages(pdf.numPages);
-      } catch (error) {
-        console.error("Error loading PDF for viewer:", error);
+      } catch (err: any) {
+        console.error("Error loading PDF for viewer:", err);
+        setError(err.message || "Failed to load PDF");
       } finally {
         setIsLoading(false);
       }
     };
 
-    if (file) {
-      loadPdf();
-    }
-  }, [file]);
+    loadPdf();
+  }, [file, pdfLib]);
 
   const handleZoomIn = () => setScale(prev => Math.min(prev + 0.2, 3.0));
   const handleZoomOut = () => setScale(prev => Math.max(prev - 0.2, 0.5));
+
+  if (!pdfLib) {
+     return (
+       <div className="h-full flex items-center justify-center flex-col gap-2 text-muted-foreground">
+         <Loader2 className="w-8 h-8 animate-spin" />
+         <span className="text-sm">Initializing PDF Engine...</span>
+       </div>
+     );
+  }
 
   if (isLoading) {
     return (
@@ -88,36 +120,43 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file }) => {
     );
   }
 
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center flex-col gap-2 text-destructive p-4 text-center">
+        <AlertCircle className="w-8 h-8" />
+        <span className="font-semibold">Unable to load PDF</span>
+        <span className="text-xs text-muted-foreground">{error}</span>
+      </div>
+    );
+  }
+
   if (!pdfDocument) {
     return (
       <div className="h-full flex items-center justify-center text-muted-foreground">
-        Unable to load PDF.
+        No PDF loaded.
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full bg-muted/20 relative">
-      {/* Inject Styles */}
       <style>{textLayerStyles}</style>
 
-      {/* Toolbar */}
       <div className="flex items-center justify-between p-2 border-b bg-background z-10 sticky top-0 shadow-sm">
         <span className="text-xs font-mono text-muted-foreground px-2">
           {numPages} Pages
         </span>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" onClick={handleZoomOut} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={handleZoomOut} className="h-8 w-8" disabled={!pdfDocument}>
             <ZoomOut className="w-4 h-4" />
           </Button>
           <span className="text-xs font-mono w-12 text-center">{Math.round(scale * 100)}%</span>
-          <Button variant="ghost" size="icon" onClick={handleZoomIn} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={handleZoomIn} className="h-8 w-8" disabled={!pdfDocument}>
             <ZoomIn className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
-      {/* Pages Container */}
       <div className="flex-1 overflow-auto p-4 custom-scrollbar" ref={containerRef}>
         <div className="flex flex-col items-center gap-4">
           {Array.from({ length: numPages }, (_, i) => (
@@ -126,6 +165,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file }) => {
               pageNumber={i + 1} 
               pdf={pdfDocument} 
               scale={scale} 
+              pdfLib={pdfLib}
             />
           ))}
         </div>
@@ -138,27 +178,23 @@ interface PdfPageProps {
   pageNumber: number;
   pdf: any;
   scale: number;
+  pdfLib: any;
 }
 
-const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
+const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale, pdfLib }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [isVisible, setIsVisible] = useState(false);
 
-  // --- Optimization: Intersection Observer (Lazy Loading) ---
-  // Only render heavy canvas/text layers when the page is actually visible in the viewport.
   useEffect(() => {
       const observer = new IntersectionObserver(([entry]) => {
           if (entry.isIntersecting) {
               setIsVisible(true);
-              // Once visible, we keep it rendered for better scroll UX (or we could unmount for strict memory usage)
-              // For PDF reading, keeping visited pages is usually better, but for huge docs, we might want to unmount.
-              // Here we stick to "render once visible".
               observer.disconnect();
           }
-      }, { rootMargin: "200px" }); // Pre-load 200px before appearing
+      }, { rootMargin: "200px" });
 
       if (wrapperRef.current) {
           observer.observe(wrapperRef.current);
@@ -166,9 +202,7 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
       return () => observer.disconnect();
   }, []);
 
-  // Set initial dimensions placeholder to prevent layout jump
   useEffect(() => {
-    // We can get viewport without rendering to set strict dimensions
     const getDims = async () => {
         try {
             const page = await pdf.getPage(pageNumber);
@@ -179,9 +213,8 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
     getDims();
   }, [pdf, pageNumber, scale]);
 
-  // Actual Rendering Logic
   useEffect(() => {
-    if (!isVisible || !dimensions.width) return;
+    if (!isVisible || !dimensions.width || !pdfLib) return;
 
     let active = true;
     let renderTask: any = null;
@@ -194,12 +227,10 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
         const page = await pdf.getPage(pageNumber);
         const viewport = page.getViewport({ scale });
         
-        // High DPI Support
         const outputScale = window.devicePixelRatio || 1;
         
         if (!active) return;
 
-        // Render Canvas
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
         if (context) {
@@ -217,11 +248,11 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
             transform: transform,
             viewport: viewport
           };
+          
           renderTask = page.render(renderContext);
           await renderTask.promise;
         }
 
-        // Render Text Layer
         if (textLayerRef.current) {
           const textContent = await page.getTextContent();
           if (!active) return;
@@ -230,10 +261,7 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
           textLayerDiv.innerHTML = ''; 
           textLayerDiv.style.setProperty('--scale-factor', `${scale}`);
           
-          // Import renderTextLayer - handling both named export and default export scenarios
-          const renderTextLayer = 
-            (pdfjsModule as any).renderTextLayer || 
-            (pdfjsLib as any).renderTextLayer;
+          const renderTextLayer = pdfLib.renderTextLayer;
 
           if (typeof renderTextLayer === 'function') {
             textLayerRenderTask = renderTextLayer({
@@ -242,14 +270,17 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
               viewport: viewport
             });
             await textLayerRenderTask.promise;
-          } else {
-             console.warn("renderTextLayer not found in pdfjs-dist module");
           }
         }
 
       } catch (err: any) {
-        if (err.name !== 'RenderingCancelledException') {
-            // silent fail for cancellations
+        const isCancelled = 
+            err.name === 'RenderingCancelledException' || 
+            err.message === 'Canceled' ||
+            err.message?.includes('cancelled');
+
+        if (!isCancelled) {
+             console.error(`Page ${pageNumber} render error:`, err);
         }
       }
     };
@@ -258,10 +289,18 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
 
     return () => { 
       active = false;
-      if (renderTask) renderTask.cancel();
-      if (textLayerRenderTask) textLayerRenderTask.cancel();
+      if (renderTask) {
+        try {
+            renderTask.cancel();
+        } catch(e) { /* ignore */ }
+      }
+      if (textLayerRenderTask) {
+        try {
+             textLayerRenderTask.cancel();
+        } catch(e) { /* ignore */ }
+      }
     };
-  }, [pdf, pageNumber, scale, isVisible, dimensions.width]);
+  }, [pdf, pageNumber, scale, isVisible, dimensions.width, pdfLib]);
 
   return (
     <div 
@@ -269,7 +308,7 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale }) => {
       className="relative shadow-md bg-white mb-4 transition-all duration-200 ease-in-out"
       style={{ 
           width: dimensions.width || '100%', 
-          height: dimensions.height || '800px', // Min-height placeholder
+          height: dimensions.height || '800px',
           backgroundColor: '#fff' 
       }} 
     >

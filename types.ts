@@ -45,6 +45,22 @@ export interface StructuralAnalysis {
     avgTokenLength: number;
 }
 
+export interface SemanticState {
+  provenance?: {
+    source: 'ai' | 'human';
+    model: string;
+    generated_at: string;
+  };
+  predicate: string | null; 
+  arguments: string[];
+  features: {
+    tense: string | null;
+    aspect: string | null;
+    modality: string | null;
+    polarity: string | null;
+  };
+}
+
 export interface ExtractedBlock {
   id: string;
   rawSource: string;
@@ -58,6 +74,7 @@ export interface ExtractedBlock {
     warnings: string[];
   };
   structural?: StructuralAnalysis;
+  semantic_state?: SemanticState;
 }
 
 export interface ParseReport {
@@ -129,21 +146,7 @@ export interface IGTXBlock {
     translation: string | null;
   };
   // Stage 3: Semantic Normalization (Placeholders for downstream tools)
-  semantic_state: {
-    provenance?: {
-      source: 'ai' | 'human';
-      model: string;
-      generated_at: string;
-    };
-    predicate: string | null; 
-    arguments: string[];
-    features: {
-      tense: string | null;
-      aspect: string | null;
-      modality: string | null;
-      polarity: string | null;
-    };
-  };
+  semantic_state: SemanticState;
   // Stage 4: Vector Projection (Placeholders)
   vector_state: {
     embedding: number[] | null; 

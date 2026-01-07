@@ -20,10 +20,11 @@ interface InputSectionProps {
   profile: LanguageProfile;
   setProfile: (val: LanguageProfile) => void;
   lang: UILanguage;
+  apiKey: string;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ 
-    input, setInput, onProcess, onClear, profile, setProfile, lang
+    input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -126,11 +127,18 @@ export const InputSection: React.FC<InputSectionProps> = ({
 
   const handleUrlFetch = async () => {
     if (!urlInput) return;
+    
+    if (!apiKey) {
+        setInput(`[SYSTEM ERROR]: API Key Missing\n----------------------------------------\nPlease enter your Gemini API Key in the top header to use URL scraping.`);
+        setActiveTab("input");
+        return;
+    }
+
     setIsScraping(true);
     setLoadingStatus("Scraping content via Gemini Pro..."); 
     
     try {
-        const { text, metadata } = await scrapeUrlViaGemini(urlInput);
+        const { text, metadata } = await scrapeUrlViaGemini(urlInput, apiKey);
         
         if (!text || text.trim().length === 0) {
              setInput(`[SYSTEM WARNING]: The AI could not retrieve sufficient content from this URL.\n\nReason: The page content may not be fully indexed by Google Search, or it requires direct browsing (which is restricted).\n\nAction: Please Copy & Paste the text manually from ${urlInput} into this editor.`);
@@ -341,7 +349,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                                 disabled={isScraping}
                             />
                         </div>
-                        <Button onClick={handleUrlFetch} disabled={!urlInput || isScraping} className="shrink-0">
+                        <Button onClick={handleUrlFetch} disabled={!urlInput || isScraping || !apiKey} className="shrink-0">
                             {isScraping ? <Loader2 className="w-4 h-4 animate-spin" /> : t.btn_fetch}
                         </Button>
                     </div>
@@ -352,6 +360,15 @@ export const InputSection: React.FC<InputSectionProps> = ({
                         </span>
                         This tool extracts text and transcripts via search. Direct audio files cannot be scraped by browser security policies. If extraction fails, please manually Copy & Paste content.
                     </div>
+                    
+                    {!apiKey && (
+                         <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3 text-[11px] text-destructive/80">
+                            <span className="font-semibold block mb-1">
+                                API Key Required
+                            </span>
+                            Please enter your Gemini API Key in the top header to enable this feature.
+                        </div>
+                    )}
                 </div>
              </TabsContent>
 

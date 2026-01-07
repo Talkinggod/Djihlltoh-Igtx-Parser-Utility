@@ -16,9 +16,10 @@ interface OutputSectionProps {
   report: ParseReport | null;
   onUpdateReport?: (report: ParseReport) => void;
   lang: UILanguage;
+  apiKey: string;
 }
 
-export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateReport, lang }) => {
+export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateReport, lang, apiKey }) => {
   const [activeTab, setActiveTab] = useState<string>("editor");
   const [copied, setCopied] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -84,15 +85,20 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
 
   const handleAiEnrichment = async () => {
       if (!report || !onUpdateReport) return;
+      if (!apiKey) {
+          alert("Please enter a Gemini API Key in the header to use AI enrichment.");
+          return;
+      }
       setIsEnriching(true);
       setEnrichmentProgress(0);
       try {
-          const enrichedReport = await enrichReportWithSemantics(report, (processed, total) => {
+          const enrichedReport = await enrichReportWithSemantics(report, apiKey, (processed, total) => {
               setEnrichmentProgress(Math.round((processed / total) * 100));
           });
           onUpdateReport(enrichedReport);
       } catch (e) {
           console.error("Enrichment failed", e);
+          alert(`Enrichment failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
       } finally {
           setIsEnriching(false);
       }
@@ -338,6 +344,13 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                                   <Badge variant="outline" className={cn("text-[10px] gap-1", block.structural.clauseType === 'chain_clause' ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/5" : "border-blue-500/30 text-blue-600 bg-blue-500/5")} title={`Complexity Score: ${block.structural.complexityScore} (${block.structural.clauseType})`}>
                                       <Network className="w-3 h-3" />
                                       {block.structural.clauseType === 'chain_clause' ? 'Chain Clause' : 'Multiclausal'}
+                                  </Badge>
+                              )}
+
+                              {/* Visualization of Rhythm Boost */}
+                              {block.tier4 && block.tier4.contextual_boost > 0 && (
+                                  <Badge variant="outline" className="text-[10px] gap-1 border-indigo-500/30 text-indigo-600 bg-indigo-500/5" title="Score boosted by rhythmic analysis">
+                                      <Sparkles className="w-3 h-3" /> Rhythm (+{(block.tier4.contextual_boost * 100).toFixed(0)}%)
                                   </Badge>
                               )}
                           </div>

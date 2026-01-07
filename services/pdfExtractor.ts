@@ -1,15 +1,5 @@
 
-import * as pdfjsModule from 'pdfjs-dist';
-import { createWorker } from 'tesseract.js';
 import { PdfTextDiagnostics } from '../types';
-
-// Handle potential ESM/CJS interop issues
-const pdfjsLib = (pdfjsModule as any).default || pdfjsModule;
-
-// Set the worker source
-if (pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-}
 
 interface TextItem {
   str: string;
@@ -25,19 +15,24 @@ interface PdfExtractionResult {
   diagnostics: PdfTextDiagnostics;
 }
 
-// --- Optimization: Singleton OCR Worker ---
-// Tesseract worker (~20MB download + initialization) is heavy.
-// We keep a single lazy-loaded instance alive to enable fast subsequent scans.
 let ocrWorkerPromise: Promise<any> | null = null;
 
+// Helper to safely get the worker
 async function getOCRWorker() {
     if (!ocrWorkerPromise) {
         ocrWorkerPromise = (async () => {
             try {
+                // Dynamic import for Tesseract
+                // @ts-ignore
+                const Tesseract = await import('tesseract.js');
+                const createWorker = Tesseract.createWorker || Tesseract.default?.createWorker;
+                
+                if (!createWorker) throw new Error("Tesseract createWorker not found");
+
                 const worker = await createWorker('eng');
                 return worker;
             } catch (error) {
-                // If init fails, clear promise so we can retry next time
+                console.error("Failed to load Tesseract:", error);
                 ocrWorkerPromise = null;
                 throw error;
             }
@@ -48,12 +43,34 @@ async function getOCRWorker() {
 
 /**
  * Extracts text from a PDF file and computes structural diagnostics.
+ * Uses dynamic imports to ensure the app doesn't crash on load if libs are missing.
  */
 export async function extractTextFromPdf(
   file: File, 
   onProgress?: (percent: number, status: string) => void
 ): Promise<PdfExtractionResult> {
   let pdfDocument;
+  let pdfjsLib: any;
+
+  if (onProgress) onProgress(0, "Initializing PDF Engine...");
+
+  try {
+      // Dynamic import for PDF.js
+      // @ts-ignore
+      const pdfjsModule = await import('pdfjs-dist');
+      pdfjsLib = pdfjsModule.default || pdfjsModule;
+
+      if (!pdfjsLib) {
+          throw new Error("PDF.js module failed to load");
+      }
+
+      // Configure Worker
+      if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      }
+  } catch (e: any) {
+      throw new Error(`Failed to load PDF engine: ${e.message}. Check your internet connection.`);
+  }
 
   if (onProgress) onProgress(0, "Loading PDF document...");
   try {
@@ -186,8 +203,6 @@ export async function extractTextFromPdf(
                 if (lineStr.trim().length > 0) {
                     totalLines++;
                     totalCharLength += lineStr.length;
-                    // IGT lines are naturally short, but PDF fragmentation creates VERY short lines (fragments)
-                    // We treat lines < 15 chars as potential fragments in standard layout context
                     if (lineStr.length < 15) fragmentedLines++;
                     if (lineStr.trim().endsWith('-')) hyphenBreaks++;
                 }

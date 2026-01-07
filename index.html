@@ -7,8 +7,39 @@
     <title>Dziłtǫ́ǫ́ - IGT Extractor</title>
     <link rel="icon" type="image/jpeg" href="https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg" />
     <link rel="manifest" href="/public/manifest.json">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Critical Error Handler for Resource Loading Failures (Capturing Phase) -->
+    <script>
+      window.addEventListener('error', function(event) {
+        const root = document.getElementById('root');
+        
+        let errorMsg = event.message || "Unknown Error";
+        let errorTitle = "Application Error";
+
+        // Check if it is a resource loading error (script import failed)
+        if (event.target && (event.target instanceof HTMLScriptElement || event.target instanceof HTMLLinkElement)) {
+           errorTitle = "Module Loading Failed";
+           errorMsg = `Failed to load resource: ${event.target.src || event.target.href}. Check your internet connection or ad blockers.`;
+        }
+        
+        if (root) {
+          // Only overwrite if we haven't rendered the app yet (loader still present)
+          if (root.innerHTML.includes("Initializing")) {
+             root.innerHTML = `
+            <div style="padding: 2rem; font-family: sans-serif; color: #ef4444; background: #0f172a; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 1rem;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <h2 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem;">${errorTitle}</h2>
+              <p style="max-width: 500px; line-height: 1.5; color: #cbd5e1;">${errorMsg}</p>
+              <button onclick="window.location.reload()" style="margin-top: 1.5rem; padding: 0.75rem 1.5rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Reload Application</button>
+            </div>
+          `;
+          }
+        }
+      }, true); // true = Use Capturing phase to catch resource errors
+    </script>
+
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -118,22 +149,39 @@
   <script type="importmap">
 {
   "imports": {
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0?deps=react@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client?deps=react@19.0.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.469.0?deps=react@19.0.0",
     "pdfjs-dist": "https://esm.sh/pdfjs-dist@3.11.174",
     "tesseract.js": "https://esm.sh/tesseract.js@5.1.0",
-    "clsx": "https://esm.sh/clsx@^2.1.1",
-    "tailwind-merge": "https://esm.sh/tailwind-merge@^3.4.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-    "franc": "https://esm.sh/franc@6.2.0"
+    "clsx": "https://esm.sh/clsx@2.1.1",
+    "tailwind-merge": "https://esm.sh/tailwind-merge@2.3.0",
+    "@google/genai": "https://esm.sh/@google/genai@0.3.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>
 </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
+    <div id="root">
+      <div style="height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f172a; color: #94a3b8; font-family: sans-serif; flex-direction: column; gap: 1rem;">
+         <!-- Fallback Loader -->
+         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 3s linear infinite; color: #10b981;">
+            <circle cx="12" cy="12" r="10" stroke-opacity="0.2"/>
+            <path d="M12 2a10 10 0 0 1 10 10" />
+         </svg>
+         <div style="text-align: center; animation: pulse 2s infinite;">
+             <div style="font-size: 1.1rem; font-weight: 600; color: #e2e8f0; letter-spacing: 0.05em; margin-bottom: 0.25rem;">DZÍŁTǪ́Ǫ́</div>
+             <div style="font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; color: #64748b;">Initializing Scientific Parser...</div>
+         </div>
+         <style>
+            @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            @keyframes pulse { 0% { opacity: 0.7; } 50% { opacity: 1; } 100% { opacity: 0.7; } }
+         </style>
+      </div>
+    </div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

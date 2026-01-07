@@ -9,17 +9,14 @@ const BATCH_SIZE = 5;
  * This process is post-hoc and does not alter the deterministic Stage 1 output.
  */
 export async function enrichReportWithSemantics(
-  report: ParseReport, 
-  onProgress: (processed: number, total: number) => void,
-  apiKey?: string
+  report: ParseReport,
+  apiKey: string,
+  onProgress: (processed: number, total: number) => void
 ): Promise<ParseReport> {
     if (!apiKey) {
-        console.warn("No API key provided for enrichment");
-        return report; // Return unchanged if no key
+        throw new Error("Gemini API Key is missing. Please enter it in the header.");
     }
-    
-    const ai = new GoogleGenAI({ apiKey });
-    
+
     const totalBlocks = report.blocks.length;
     let processed = 0;
     
@@ -33,7 +30,7 @@ export async function enrichReportWithSemantics(
         const currentBatch = enrichedBlocks.slice(i, batchEnd);
         
         try {
-            const enrichedBatch = await processBatch(currentBatch, ai);
+            const enrichedBatch = await processBatch(currentBatch, apiKey);
             
             // Update the main arrays
             for (let j = 0; j < enrichedBatch.length; j++) {
@@ -84,7 +81,10 @@ export async function enrichReportWithSemantics(
     };
 }
 
-async function processBatch(blocks: any[], ai: any): Promise<any[]> {
+async function processBatch(blocks: any[], apiKey: string): Promise<any[]> {
+    // Initialize the client with the provided key
+    const ai = new GoogleGenAI({ apiKey });
+
     // CRITICAL GUARDRAIL: Only send clean_text (L1), block_id, and position.
     // Do NOT send rawSource, OCR diagnostics, or rejected lines to prevent hallucination 
     // based on noisy glosses or layout artifacts.
@@ -133,9 +133,19 @@ async function processBatch(blocks: any[], ai: any): Promise<any[]> {
         }
     });
 
-    const json = JSON.parse(response.text || "{\"results\": []}");
-    const results = json.results || [];
+    let rawText = response.text || "{\"results\": []}";
+    // Cleanup potential Markdown code fences which might slip through despite MIME type
+    rawText = rawText.replace(/```json\n?|```/g, '').trim();
 
+    let json;
+    try {
+        json = JSON.parse(rawText);
+    } catch (e) {
+        console.error("Failed to parse JSON from AI response", rawText);
+        json = { results: [] };
+    }
+
+    const results = json.results || [];
     const timestamp = new Date().toISOString();
     const modelVersion = "gemini-3-pro-preview";
 

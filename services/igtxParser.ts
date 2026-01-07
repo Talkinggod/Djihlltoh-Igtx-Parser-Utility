@@ -1,6 +1,5 @@
 
 import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis } from '../types';
-import { franc } from 'franc';
 
 const IGTX_VERSION = "1.9.1";
 
@@ -81,8 +80,6 @@ function generateHash(str: string): string {
 
 /**
  * Analyze structural complexity to detect Multiclausal/Chain structures.
- * This differentiates the tool from standard LLMs by mathematically flagging complexity
- * rather than smoothing it over.
  */
 function analyzeStructure(text: string, profile: LanguageProfile): StructuralAnalysis {
     const tokens = text.split(/\s+/).filter(t => t.length > 0);
@@ -102,15 +99,12 @@ function analyzeStructure(text: string, profile: LanguageProfile): StructuralAna
     let clauseType: StructuralAnalysis['clauseType'] = 'simple';
 
     // --- Metric 1: Segmentation Analysis ---
-    // Split text by boundaries to find "macro-segments"
-    // Filter segments that are too short (e.g., interjections "Oh,") to be full clauses
     const segments = text.split(CLAUSE_BOUNDARY_REGEX)
                          .map(s => s.trim())
                          .filter(s => s.split(/\s+/).length >= 2); 
     
     const segmentCount = segments.length;
 
-    // Base complexity from token volume (approx. log scale)
     if (tokenCount > 7) complexityScore += 0.1;
     if (tokenCount > 15) complexityScore += 0.1;
     if (tokenCount > 25) complexityScore += 0.15;
@@ -120,37 +114,26 @@ function analyzeStructure(text: string, profile: LanguageProfile): StructuralAna
     if (profile === 'polysynthetic' || profile === 'morphological_dense') {
         const longWords = tokens.filter(t => t.length > 12);
         
-        // Morphological density signals
         if (avgTokenLength > 8) complexityScore += 0.15;
         if (longWords.length > 0) complexityScore += (0.1 * longWords.length);
         
-        // Chain Clause Detection:
-        // 1. Multiple very long words (often holophrastic clauses strung together)
-        // 2. Mix of long words and explicit segmentation
         if (longWords.length >= 2 || (longWords.length >= 1 && segmentCount >= 2)) {
              clauseType = 'chain_clause';
              complexityScore += 0.3;
         } 
-        // Single Holophrase (structurally simple but computationally dense)
         else if (tokenCount < 5 && avgTokenLength > 10) {
             complexityScore += 0.15; 
         }
     }
     
     if (profile === 'analytic' || profile === 'generic') {
-        // Serial Verb / Compound detection
-        // 1. Explicit coordination via punctuation
         if (segmentCount >= 2) {
             complexityScore += (0.15 * segmentCount);
             clauseType = 'compound';
         }
         
-        // 2. Serial Verb Construction (SVC) heuristic:
-        // Long sequence of relatively short words without punctuation breaks.
-        // (Typical of Sino-Tibetan, Kwa, etc. glosses)
         if (tokenCount > 12 && punctuationCount === 0 && avgTokenLength < 6) {
             complexityScore += 0.25;
-            // Differentiate simple long sentence vs multiclausal heuristic
             if (tokenCount > 18) {
                 clauseType = 'compound'; 
             }
@@ -159,7 +142,6 @@ function analyzeStructure(text: string, profile: LanguageProfile): StructuralAna
 
     // --- Metric 3: Recursive/Embedded Structures ---
 
-    // Parenthetical Embedding (excluding citations like "(12a)")
     if (text.includes('(') && text.includes(')')) {
         const contentInParens = text.match(/\(([^)]+)\)/)?.[1] || "";
         const isCitation = /^\d+[a-z]?$/.test(contentInParens.trim());
@@ -170,23 +152,17 @@ function analyzeStructure(text: string, profile: LanguageProfile): StructuralAna
         }
     }
 
-    // Quotative Constructions (e.g., 'He said, "Go away"')
     const quoteMatches = text.match(/["'“‘](.*?)["'”’]/);
     if (quoteMatches) {
         const outsideContent = text.replace(quoteMatches[0], '').trim();
-        // If there is substantial predication outside the quote
         if (outsideContent.split(/\s+/).length >= 2) {
              complexityScore += 0.3;
              clauseType = 'complex_embedded';
         }
     }
 
-    // --- Final Classification & Normalization ---
-    
-    // Cap score
     complexityScore = Math.min(1.0, parseFloat(complexityScore.toFixed(2)));
 
-    // Promote 'simple' to 'compound' if score is very high (latent complexity)
     if (complexityScore > 0.75 && clauseType === 'simple') {
         clauseType = 'compound';
     }
@@ -269,60 +245,62 @@ function tier4Check(text: string, languageHint?: string, diagnostics?: PdfTextDi
   };
 }
 
-function getMode(numbers: number[]): number {
-    if (numbers.length === 0) return 1;
-    const modeMap: Record<number, number> = {};
-    let maxEl = numbers[0], maxCount = 1;
-    for (let i = 0; i < numbers.length; i++) {
-        let el = numbers[i];
-        if(modeMap[el] == null) modeMap[el] = 1;
-        else modeMap[el]++;  
-        if(modeMap[el] > maxCount) {
-            maxEl = el;
-            maxCount = modeMap[el];
-        }
-    }
-    return maxEl;
-}
-
+/**
+ * Stage 2 Analysis: Contextual Rhythm Detection
+ * Uses a sliding window to detect if high-confidence lines appear at regular intervals (e.g., every 3 lines).
+ * If a rhythm is detected, it boosts candidates that align with this rhythm but had marginal scores.
+ */
 function applyContextualTier4(blocks: ExtractedBlock[]): ExtractedBlock[] {
-    if (blocks.length < 3) return blocks;
-    const gaps: number[] = [];
-    for (let i = 1; i < blocks.length; i++) { gaps.push(blocks[i].lineNumber - blocks[i-1].lineNumber); }
-    const modeGap = getMode(gaps);
+    if (blocks.length < 5) return blocks; // Need enough data for rhythm
 
-    return blocks.map((block, index) => {
-        let rawContextualBoost = 0;
-        const contextualWarnings: string[] = [];
+    // 1. Calculate intervals between consecutive candidates
+    const intervals: number[] = [];
+    for(let i=1; i<blocks.length; i++) {
+        intervals.push(blocks[i].lineNumber - blocks[i-1].lineNumber);
+    }
 
-        if (index > 0) {
-            const gap = block.lineNumber - blocks[index - 1].lineNumber;
-            if (gap === modeGap) rawContextualBoost += 0.07;
-            else if (modeGap > 1 && gap !== modeGap) contextualWarnings.push("tier4:igt_alternation_break");
-            if (modeGap === 1 && gap === 1) rawContextualBoost += 0.03; 
+    // 2. Find Mode Interval (Frequency Map)
+    const frequency: Record<number, number> = {};
+    let maxFreq = 0;
+    let modeInterval = 0;
+
+    intervals.forEach(int => {
+        if(int > 0 && int < 10) { // Assume rhythm is within 10 lines
+             frequency[int] = (frequency[int] || 0) + 1;
+             if(frequency[int] > maxFreq) {
+                 maxFreq = frequency[int];
+                 modeInterval = int;
+             }
         }
+    });
 
-        if (index > 0 && index < blocks.length - 1) {
-            const prev = blocks[index - 1];
-            const next = blocks[index + 1];
-            const getSpecialCharDensity = (str: string) => (str.match(SPECIAL_CHAR_REGEX) || []).length / str.length;
-            
-            const myDensity = getSpecialCharDensity(block.extractedLanguageLine);
-            const neighborAvg = (getSpecialCharDensity(prev.extractedLanguageLine) + getSpecialCharDensity(next.extractedLanguageLine)) / 2;
+    // 3. Check if rhythm is significant (> 40% of intervals match mode)
+    // and mode is > 1 (mode 1 implies simple continuous paragraph text)
+    const isRhythmic = (maxFreq / intervals.length) > 0.4;
+    
+    if (!isRhythmic || modeInterval < 1) return blocks;
 
-            if (myDensity === 0 && neighborAvg > 0.10) contextualWarnings.push("tier4:register_shift_detected");
+    // 4. Boost matching blocks
+    return blocks.map((block, i) => {
+        if (i === 0) return block;
+        const prev = blocks[i-1];
+        const diff = block.lineNumber - prev.lineNumber;
+        
+        // Strict tolerance for determinism
+        if (diff === modeInterval) {
+            // Check if this block was marginal (0.40 - 0.70)
+            if (block.confidence < 0.7) {
+                return {
+                    ...block,
+                    confidence: Math.min(0.95, block.confidence + 0.25), // Significant boost
+                    tier4: {
+                        contextual_boost: 0.25,
+                        warnings: ['Contextual Rhythm Match']
+                    }
+                }
+            }
         }
-
-        const tier4Boost = Math.min(rawContextualBoost, 0.10);
-        const newConfidence = Math.min(0.99, block.confidence + tier4Boost);
-        const uniqueWarnings = [...new Set([...block.warnings, ...contextualWarnings])];
-
-        return {
-            ...block,
-            confidence: newConfidence,
-            warnings: uniqueWarnings,
-            tier4: { contextual_boost: parseFloat(tier4Boost.toFixed(3)), warnings: contextualWarnings }
-        };
+        return block;
     });
 }
 
@@ -410,25 +388,17 @@ export function parseIGT(
 ): ParseReport {
   const normalizedText = rawText.normalize('NFC');
   
-  // --- Auto-Detection & Profile Inference Logic ---
   let detectedLang = sourceMetadata.language;
-  let isAutoDetected = false;
-
+  
+  // Use simple heuristic fallback instead of franc to avoid heavy bundle dependency
   if ((!detectedLang || detectedLang === 'und' || detectedLang === '') && rawText.length > 0) {
-      // Franc works best with more text, but limiting the sample helps performance
-      const sample = rawText.slice(0, 2000); 
-      const bestGuess = franc(sample);
-      
-      // franc returns 'und' if it can't detect
-      if (bestGuess !== 'und') {
-          detectedLang = bestGuess;
-          isAutoDetected = true;
-      }
+     // Simple heuristic: if contains CJK chars -> zh
+     if (/[\u4E00-\u9FFF]/.test(rawText)) detectedLang = 'zho';
+     // if contains Arabic -> ara
+     else if (/[\u0600-\u06FF]/.test(rawText)) detectedLang = 'ara';
+     else detectedLang = 'und';
   }
 
-  // Determine the effective profile.
-  // We only switch automatically if the user has selected 'generic' (default)
-  // AND we have a strong language mapping for the detected code.
   let effectiveProfile = profile;
   if (profile === 'generic' && detectedLang && LANG_PROFILE_MAP[detectedLang]) {
       effectiveProfile = LANG_PROFILE_MAP[detectedLang];
@@ -436,55 +406,50 @@ export function parseIGT(
 
   const tier4Assessment = tier4Check(normalizedText, detectedLang, pdfDiagnostics);
   const rawLines = normalizedText.split(/\r?\n/);
-  let blocks: ExtractedBlock[] = [];
-  const igtxBlocks: IGTXBlock[] = [];
   
-  let fullExtractedText = "";
-  let totalConfidence = 0;
-
-  const fullSourceMetadata: IGTXSource = {
-      title: sourceMetadata.title || "Untitled Document",
-      author: sourceMetadata.author || "Unknown",
-      year: sourceMetadata.year || null,
-      language: detectedLang || "und", // Use detected language if available
-      orthography: sourceMetadata.orthography || "standard",
-      source_type: sourceMetadata.source_type || "legacy_text",
-      source_url: sourceMetadata.source_url,
-      retrieval_method: sourceMetadata.retrieval_method,
-      model: sourceMetadata.model,
-      retrieved_at: sourceMetadata.retrieved_at
-  };
+  // PASS 1: Candidate Extraction (Lower Threshold)
+  // We accept lines with lower confidence initially to allow Contextual Tier 4 to analyze them.
+  const CANDIDATE_THRESHOLD = 0.40; 
+  const candidates: ExtractedBlock[] = [];
 
   rawLines.forEach((line, index) => {
     const trimmed = line.trim();
     if (!trimmed) return;
 
-    // Use the effective profile for scoring
     const { score, warnings } = calculateLineConfidence(trimmed, effectiveProfile);
-    const THRESHOLD = 0.60; 
 
-    if (score >= THRESHOLD) {
+    if (score >= CANDIDATE_THRESHOLD) {
       const cleanLine = trimmed.replace(CLEAN_LINE_REGEX, '');
       const blockHash = generateHash(trimmed + index); 
       
-      // NEW: Run structural analysis on the accepted line using effective profile
       const structural = analyzeStructure(cleanLine, effectiveProfile);
 
-      blocks.push({
+      candidates.push({
         id: `blk-${blockHash}`, 
         rawSource: line,
         extractedLanguageLine: cleanLine,
         confidence: score,
         warnings,
         lineNumber: index + 1,
-        structural // Attach the analysis
+        structural
       });
     }
   });
 
-  blocks = applyContextualTier4(blocks);
+  // PASS 2: Contextual Rhythm Analysis
+  // If a rhythm is detected, boost candidates fitting the pattern.
+  const boostedCandidates = applyContextualTier4(candidates);
+
+  // PASS 3: Final Filter (Strict Threshold)
+  const FINAL_THRESHOLD = 0.60;
+  const blocks = boostedCandidates.filter(b => b.confidence >= FINAL_THRESHOLD);
+
+  // --- Construction of IGTX Document ---
 
   let extractedCount = 0;
+  let fullExtractedText = "";
+  let totalConfidence = 0;
+  const igtxBlocks: IGTXBlock[] = [];
   
   blocks.forEach(block => {
       fullExtractedText += block.extractedLanguageLine + "\n";
@@ -530,6 +495,19 @@ export function parseIGT(
       });
   });
 
+  const fullSourceMetadata: IGTXSource = {
+      title: sourceMetadata.title || "Untitled Document",
+      author: sourceMetadata.author || "Unknown",
+      year: sourceMetadata.year || null,
+      language: detectedLang || "und", 
+      orthography: sourceMetadata.orthography || "standard",
+      source_type: sourceMetadata.source_type || "legacy_text",
+      source_url: sourceMetadata.source_url,
+      retrieval_method: sourceMetadata.retrieval_method,
+      model: sourceMetadata.model,
+      retrieved_at: sourceMetadata.retrieved_at
+  };
+
   const allBlockHashes = igtxBlocks.map(b => b.block_id).join('');
   const docId = generateHash(allBlockHashes);
 
@@ -541,7 +519,6 @@ export function parseIGT(
           version: IGTX_VERSION,
           deterministic: true,
           timestamp: new Date().toISOString(),
-          // Record the profile that was actually used (effective profile)
           profile_used: effectiveProfile,
           unicode_normalization: 'NFC',
           tier4_assessment: {
@@ -559,7 +536,7 @@ export function parseIGT(
     timestamp: new Date().toISOString(),
     fileSource: filename || "raw_input",
     tier4Assessment,
-    profileUsed: effectiveProfile, // Return effective profile
+    profileUsed: effectiveProfile,
     provenanceHash: docId,
     blockDefinition: "Line-based heuristic extraction unit",
     pdfDiagnostics

@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { InputSection } from './components/InputSection';
 import { OutputSection } from './components/OutputSection';
@@ -13,6 +13,39 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [profile, setProfile] = useState<LanguageProfile>('generic');
   const [lang, setLang] = useState<UILanguage>('en');
+  
+  // Initialize API Key with persistence strategy:
+  // 1. Environment Variable (Local Dev / Configured Deployment)
+  // 2. Session Storage (User entered in previous session tab)
+  const [apiKey, setApiKey] = useState<string>(() => {
+    let envKey = '';
+    try {
+      // Guard against ReferenceError in browser environments where 'process' is not defined
+      // @ts-ignore
+      if (typeof process !== 'undefined' && process && process.env) {
+        // @ts-ignore
+        envKey = process.env.API_KEY || '';
+      }
+    } catch (e) {
+      // process is not defined, ignore
+    }
+
+    if (envKey) return envKey;
+
+    if (typeof window !== 'undefined') {
+        return sessionStorage.getItem('gemini_api_key') || '';
+    }
+    return '';
+  });
+
+  // Persist API Key to SessionStorage (Secure-ish: clears when tab is closed)
+  useEffect(() => {
+    if (apiKey) {
+      sessionStorage.setItem('gemini_api_key', apiKey);
+    } else {
+      sessionStorage.removeItem('gemini_api_key');
+    }
+  }, [apiKey]);
 
   const handleProcess = (sourceMeta: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics) => {
     if (!input.trim()) return;
@@ -38,7 +71,7 @@ function App() {
       className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20 selection:text-primary overflow-x-hidden"
       dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
-      <Header lang={lang} setLang={setLang} />
+      <Header lang={lang} setLang={setLang} apiKey={apiKey} setApiKey={setApiKey} />
       
       <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6 items-start justify-center">
         
@@ -52,6 +85,7 @@ function App() {
             profile={profile}
             setProfile={setProfile}
             lang={lang}
+            apiKey={apiKey}
           />
         </div>
 
@@ -69,6 +103,7 @@ function App() {
             report={report} 
             onUpdateReport={setReport}
             lang={lang} 
+            apiKey={apiKey}
           />
         </div>
 
