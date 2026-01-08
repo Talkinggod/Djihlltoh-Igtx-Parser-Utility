@@ -1,9 +1,105 @@
-
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { ParseReport, ParserDomain } from "../types";
 import { DocumentTypeService } from "./documentTypeService";
 
 const BATCH_SIZE = 5;
+
+// Tool Definition for writing to editor
+const writeEditorTool: FunctionDeclaration = {
+    name: "write_to_editor",
+    description: "Overwrites the main application editor with the provided text content. Use this to generate full legal documents, templates, drafting motions, or linguistic gloss examples for the user.",
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            content: {
+                type: Type.STRING,
+                description: "The full text content to write into the editor. For legal documents, ensure standard formatting (Caption, Index No, Wherefore clause)."
+            }
+        },
+        required: ["content"]
+    }
+};
+
+/**
+ * Sends a message to the AI Chatbot.
+ * Supports Function Calling for editor manipulation.
+ */
+export async function sendChatMessage(
+    history: { role: 'user' | 'model', text: string }[], 
+    newMessage: string, 
+    apiKey: string,
+    domain: ParserDomain,
+    currentProfile: string,
+    contextData?: string
+): Promise<{ text: string, toolCall?: { name: string, args: any } }> {
+    if (!apiKey) throw new Error("API Key required");
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Dynamic Persona based on Domain
+    let systemInstruction = "";
+    if (domain === 'legal') {
+        systemInstruction = `You are the Senior Legal Assistant for Dziłtǫ́ǫ́ Legal Studio. 
+        
+        Role:
+        - Assist users with Civil Procedure (NY CPLR context), Legal Pleading structures, and Document formatting.
+        - **Document Generation**: You have access to a tool 'write_to_editor'. Use it whenever the user asks you to write, draft, create, or generate a document.
+        - **Formatting**: When generating legal documents, ALWAYS include a proper caption (Court Name, Parties, Index No) and standard sections (Venue, Relief Requested).
+        - If asked about the specific document types (Complaint, Motion, etc.), strictly follow standard legal definitions.
+        
+        Tone: Professional, Concise, authoritative yet helpful.`;
+    } else {
+        systemInstruction = `You are the Linguistic Expert for Dziłtǫ́ǫ́ IGT Parser.
+        
+        Role:
+        - Assist users with Interlinear Glossed Text (IGT) standards (Leipzig rules).
+        - Explain linguistic concepts (Morphology, Syntax, Phonology).
+        - **Content Generation**: Use 'write_to_editor' to provide examples of IGT formats or templates when requested.
+        - Current Profile Context: ${currentProfile}.
+        
+        Tone: Academic, Precise, Analytical.`;
+    }
+
+    // Inject active document context if available
+    if (contextData && contextData.trim().length > 0) {
+        systemInstruction += `\n\n=== CURRENT DOCUMENT CONTEXT ===\n${contextData.slice(0, 15000)}\n${contextData.length > 15000 ? "...[TRUNCATED]" : ""}\n=== END CONTEXT ===\n\nUser questions may refer to the text above. If the user asks to "revise this" or "rewrite this", use the context as the source material for the 'write_to_editor' tool.`;
+    }
+
+    const chat = ai.chats.create({
+        model: 'gemini-3-pro-preview',
+        config: {
+            systemInstruction: systemInstruction,
+            temperature: 0.3, // Lower temp for factual legal/scientific answers
+            tools: [{ functionDeclarations: [writeEditorTool] }]
+        },
+        history: history.map(h => ({
+            role: h.role,
+            parts: [{ text: h.text }]
+        }))
+    });
+
+    const result = await chat.sendMessage({
+        message: newMessage
+    });
+
+    // Handle Tool Calls
+    const functionCalls = result.functionCalls;
+    if (functionCalls && functionCalls.length > 0) {
+        const call = functionCalls[0];
+        if (call.name === 'write_to_editor') {
+            // We return the tool call data to the UI to execute the side effect
+            return {
+                text: "I have drafted the document in the editor for you.",
+                toolCall: {
+                    name: call.name,
+                    args: call.args
+                }
+            };
+        }
+    }
+
+    return { text: result.text || "I could not generate a response." };
+}
 
 /**
  * Enriches the ParseReport with Semantic State (Stage 2/3) data using Gemini.

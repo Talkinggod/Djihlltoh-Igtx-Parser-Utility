@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Layers, Terminal, ShieldCheck, Globe, Key, Check, XCircle, Eye, EyeOff, Copy, X, Scale, Library } from 'lucide-react';
+import { Layers, Terminal, ShieldCheck, Globe, Key, Check, XCircle, Eye, EyeOff, Copy, X, Scale, Library, Save, HardDrive, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
@@ -14,9 +14,16 @@ interface HeaderProps {
     setApiKey: (key: string) => void;
     domain: ParserDomain;
     setDomain: (d: ParserDomain) => void;
+    // Local Sync Props
+    isLocalSyncEnabled?: boolean;
+    onConnectLocalFolder?: () => void;
+    folderName?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey, domain, setDomain }) => {
+export const Header: React.FC<HeaderProps> = ({ 
+    lang, setLang, apiKey, setApiKey, domain, setDomain,
+    isLocalSyncEnabled, onConnectLocalFolder, folderName
+}) => {
   const [imageError, setImageError] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const logoSrc = "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg";
@@ -38,7 +45,7 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
 
   return (
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
-      <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between relative">
+      <div className="max-w-[1920px] mx-auto px-4 h-16 flex items-center justify-between relative">
         
         {/* Left Side - Logo, Title & Domain Toggle */}
         <div className="flex items-center gap-4 z-20 shrink-0">
@@ -66,7 +73,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
             </p>
           </div>
 
-          {/* Domain Toggle - Moved here from center to avoid overlap */}
           <div className="hidden lg:flex ml-6 bg-muted/30 p-1 rounded-lg border border-border">
                 <button
                     onClick={() => setDomain('linguistic')}
@@ -94,6 +100,39 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
         {/* Right Side - Controls */}
         <div className="flex items-center gap-2 md:gap-4 z-20 shrink-0">
            
+           {/* Auto-save indicator */}
+           <div className="hidden md:flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/20 px-2 py-1 rounded">
+               <Save className="w-3 h-3" />
+               <span>Auto-saved</span>
+           </div>
+
+           {/* Local Folder Connect Button */}
+           {onConnectLocalFolder && (
+               <Button 
+                variant="outline" 
+                size="sm"
+                onClick={onConnectLocalFolder}
+                className={cn(
+                    "gap-2 h-8 text-xs border-dashed",
+                    isLocalSyncEnabled 
+                        ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700" 
+                        : "text-muted-foreground hover:text-primary"
+                )}
+               >
+                   {isLocalSyncEnabled ? (
+                       <>
+                           <RefreshCw className="w-3 h-3 animate-spin duration-[3s]" />
+                           <span className="hidden sm:inline">Sync: {folderName}</span>
+                       </>
+                   ) : (
+                       <>
+                           <HardDrive className="w-3 h-3" />
+                           <span className="hidden sm:inline">Connect Local Drive</span>
+                       </>
+                   )}
+               </Button>
+           )}
+
            <div className={cn(
              "flex items-center rounded-full border h-8 gap-1 pl-3 pr-1 transition-all duration-300 relative group",
              isPotentiallyValid 
@@ -160,11 +199,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, apiKey, setApiKey
                   )}
               </div>
            </div>
-
-           <Badge variant="outline" className="hidden lg:flex gap-1.5 border-emerald-900/50 bg-emerald-950/20 text-emerald-500">
-             <ShieldCheck className="w-3 h-3" />
-             {t.deterministic}
-           </Badge>
            
            <div className="w-px h-6 bg-border hidden sm:block"></div>
            

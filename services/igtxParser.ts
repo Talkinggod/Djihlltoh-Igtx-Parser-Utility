@@ -1,6 +1,6 @@
 
 
-import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain } from '../types';
+import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain, CaseMetadata, CaseType } from '../types';
 
 const IGTX_VERSION = "2.0.0-dual";
 
@@ -23,7 +23,7 @@ const GLOSS_SEPARATOR_REGEX = /[=:]/;
 // --- Legal Regex ---
 const LEGAL_CAPTION_REGEX = /(SUPREME|COUNTY|FAMILY|CIVIL|DISTRICT|CIRCUIT)\s+COURT/i;
 const LEGAL_VS_REGEX = /\s+(v\.|vs\.|against)\s+/i;
-const LEGAL_INDEX_REGEX = /(Index|Docket|Case)\s+(No\.|Number|#|ID)/i;
+const LEGAL_INDEX_REGEX = /(Index|Docket|Case)\s+(No\.|Number|#|ID)\s*:?\s*([A-Z0-9\/-]+)/i;
 const LEGAL_PARTIES_REGEX = /(Plaintiff|Defendant|Petitioner|Respondent)/i;
 const LEGAL_KEYWORDS_REGEX = /(WHEREFORE|PLEASE TAKE NOTICE|AFFIDAVIT|SWORN TO|ORDERED|ADJUDGED|DECREED)/;
 
@@ -34,12 +34,6 @@ const QUOTE_WRAP_REGEX = /^["'“‘].*["'”’]$/;
 const STANDARD_SENTENCE_REGEX = /^[A-Z].*[.?!]$/;
 const ASCII_REGEX = /^[\x20-\x7E]*$/;
 const CLAUSE_BOUNDARY_REGEX = /[,;،؛:—|]/g;
-
-const COMMON_POS_TAGS = new Set([
-  'NOM', 'ACC', 'DAT', 'GEN', 'ABL', 'LOC', 'ERG', 'ABS', 
-  'PST', 'FUT', 'PRS', 'PFV', 'IPFV', 'NEG', 'Q', 'TOP',
-  'DET', 'DEM', 'PRON', 'CLF', 'REL', 'CONJ', 'ADV', 'ADJ'
-]);
 
 // --- Language Profile Mapping (ISO-639-3 -> Profile) ---
 const LANG_PROFILE_MAP: Record<string, LanguageProfile> = {
@@ -65,6 +59,61 @@ function generateHash(str: string): string {
 }
 
 /**
+ * Heuristic extractor to auto-fill case metadata from a commencing document.
+ */
+export function extractCaseInitialMetadata(text: string): CaseMetadata {
+    const meta: CaseMetadata = {
+        type: 'Civil',
+        jurisdiction: '',
+        plaintiffs: [],
+        defendants: [],
+        indexNumber: ''
+    };
+
+    const headerText = text.slice(0, 3000); // Check first 3k chars for caption
+
+    // 1. Jurisdiction / Court
+    const courtMatch = headerText.match(LEGAL_CAPTION_REGEX);
+    if (courtMatch) {
+        // Find full line
+        const lines = headerText.split('\n');
+        const courtLine = lines.find(l => l.includes(courtMatch[0])) || courtMatch[0];
+        meta.jurisdiction = courtLine.trim();
+        
+        // Infer Type
+        if (meta.jurisdiction.includes('HOUSING') || meta.jurisdiction.includes('LANDLORD')) meta.type = 'LT';
+        else if (meta.jurisdiction.includes('SMALL')) meta.type = 'Small Claims';
+        else if (meta.jurisdiction.includes('DISTRICT')) meta.type = 'Federal';
+    }
+
+    // 2. Index Number
+    const indexMatch = headerText.match(LEGAL_INDEX_REGEX);
+    if (indexMatch && indexMatch[3]) {
+        meta.indexNumber = indexMatch[3].trim();
+    }
+
+    // 3. Parties (Basic Heuristic based on vs/against block)
+    const vsMatch = headerText.match(LEGAL_VS_REGEX);
+    if (vsMatch) {
+        const parts = headerText.split(vsMatch[0]);
+        if (parts.length >= 2) {
+            // Plaintiff is usually before VS, Defendant after
+            // Look backwards from VS for names
+            const beforeVs = parts[0].split('\n').slice(-5).join(' '); // Last 5 lines before VS
+            const afterVs = parts[1].split('\n').slice(0, 5).join(' '); // First 5 lines after VS
+            
+            // Cleanup common noise
+            const cleanName = (s: string) => s.replace(/Plaintiff|Defendant|Petitioner|Respondent/gi, '').replace(/[-\(\)]/g, '').trim();
+
+            meta.plaintiffs = [cleanName(beforeVs.split(',')[0])]; // Take first likely name
+            meta.defendants = [cleanName(afterVs.split(',')[0])];
+        }
+    }
+
+    return meta;
+}
+
+/**
  * Determine if Tier 4 processing is needed. 
  * Supports both Linguistic density checks and Legal Pleading structure checks.
  */
@@ -84,7 +133,7 @@ function tier4Check(text: string, domain: ParserDomain, languageHint?: string, d
      const indexMatch = text.match(LEGAL_INDEX_REGEX);
      if (indexMatch) {
          totalScore += 0.40;
-         signals.push({ feature: 'legal_header', weight: 0.40, description: `Found Index/Docket pattern: ${indexMatch[0]}` });
+         signals.push({ feature: 'legal_header', weight: 0.40, description: `Found Index/Docket pattern` });
      }
 
      const vsMatch = text.match(LEGAL_VS_REGEX);

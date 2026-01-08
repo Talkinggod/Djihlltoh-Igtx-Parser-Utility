@@ -1,4 +1,5 @@
 
+
 export type ParserDomain = 'linguistic' | 'legal';
 
 export type LanguageProfile = 
@@ -29,7 +30,7 @@ export interface DocumentTypeAction {
 export interface DocumentTypeDeadline {
   label: string;
   trigger: string; // e.g., "Date of Service"
-  duration: string; // e.g., "20 days"
+  duration: number; // days
   isJurisdictional: boolean; // If true, missing this is fatal
 }
 
@@ -258,4 +259,89 @@ export interface IGTXDocument {
   source: IGTXSource;
   processing: IGTXProcessingInfo;
   blocks: IGTXBlock[];
+}
+
+// --- Case Management State ---
+
+export interface CaseEvent {
+    id: string;
+    type: 'info' | 'warning' | 'error' | 'success' | 'deadline';
+    title: string;
+    message: string;
+    timestamp: Date;
+    read: boolean;
+    relatedBlockId?: string;
+}
+
+export interface Note {
+    id: string;
+    title: string;
+    content: string;
+    createdAt: string;
+    updatedAt: string;
+    history: { timestamp: string, content: string }[];
+}
+
+export interface StoredDocument {
+    id: string;
+    name: string;
+    content: string; // Text content
+    type: string; // PDF, txt
+    side: 'plaintiff' | 'defendant' | 'court' | 'neutral';
+    dateAdded: string;
+}
+
+export interface StoredExhibit {
+    id: string;
+    label: string; // e.g., "Exhibit A"
+    description: string;
+    content: string;
+    dateAdded: string;
+}
+
+export type CaseType = 'LT' | 'Civil' | 'Federal' | 'Small Claims' | 'Other';
+
+export interface CaseMetadata {
+    type: CaseType;
+    jurisdiction: string;
+    plaintiffs: string[];
+    defendants: string[];
+    indexNumber: string;
+}
+
+export interface CaseState {
+    id: string;
+    name: string; // e.g. "Complaint - Smith v Jones"
+    domain: ParserDomain;
+    
+    // Core Meta
+    caseMeta: CaseMetadata;
+
+    // Content State (Active Work Buffer)
+    input: string;
+    report: ParseReport | null;
+    
+    // Configuration
+    profile: LanguageProfile;
+    docTypeId: string;
+    referenceDate: Date; // e.g. Filing Date
+    
+    // Metadata
+    sourceMeta: Partial<IGTXSource>;
+    pdfDiagnostics?: PdfTextDiagnostics;
+    pdfFile?: File; // Store reference to file in memory
+    
+    // Temporal / Event State
+    events: CaseEvent[];
+    lastActive: Date;
+    isProcessing: boolean;
+
+    // Repositories
+    documents: StoredDocument[];
+    exhibits: StoredExhibit[];
+    notes: Note[];
+    
+    // Local File System Sync
+    localSyncEnabled: boolean;
+    directoryHandle?: any; // FileSystemDirectoryHandle (Not serializable to localStorage)
 }

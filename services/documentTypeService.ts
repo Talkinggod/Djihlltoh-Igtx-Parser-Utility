@@ -14,8 +14,8 @@ const DEFAULT_DEFINITIONS: DocumentTypeDefinition[] = [
             { id: 'request_rji', label: 'File RJI', type: 'filing', priority: 'medium', description: 'Request for Judicial Intervention needed for judge assignment.' }
         ],
         deadlines: [
-            { label: 'Service of Process', trigger: 'Filing Date', duration: '120 days', isJurisdictional: true },
-            { label: 'Answer Deadline', trigger: 'Date of Service', duration: '20 or 30 days', isJurisdictional: true }
+            { label: 'Service of Process', trigger: 'Filing Date', duration: 120, isJurisdictional: true },
+            { label: 'Answer Deadline', trigger: 'Date of Service', duration: 30, isJurisdictional: true }
         ],
         relatedMotions: ['motion_to_dismiss', 'answer'],
         strategies: [
@@ -33,8 +33,8 @@ const DEFAULT_DEFINITIONS: DocumentTypeDefinition[] = [
             { id: 'file_affidavit_service', label: 'File Affidavit of Service', type: 'filing', priority: 'critical' }
         ],
         deadlines: [
-            { label: 'Opposition Papers', trigger: 'Return Date', duration: '7 days prior', isJurisdictional: false },
-            { label: 'Reply Papers', trigger: 'Return Date', duration: '1 day prior', isJurisdictional: false }
+            { label: 'Opposition Papers', trigger: 'Return Date', duration: -7, isJurisdictional: false }, // Negative means prior
+            { label: 'Reply Papers', trigger: 'Return Date', duration: -1, isJurisdictional: false }
         ],
         relatedMotions: ['cross_motion', 'opposition'],
         strategies: [

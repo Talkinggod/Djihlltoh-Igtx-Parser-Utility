@@ -1,6 +1,6 @@
 
 import React, { useRef, useState } from 'react';
-import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel } from 'lucide-react';
+import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel, Calendar } from 'lucide-react';
 import { Card, CardHeader, CardFooter, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -23,10 +23,16 @@ interface InputSectionProps {
   lang: UILanguage;
   apiKey: string;
   domain: ParserDomain;
+  // Legal / Case Specifics
+  docTypeId?: string;
+  setDocTypeId?: (id: string) => void;
+  refDate?: Date;
+  setRefDate?: (date: Date) => void;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ 
-    input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey, domain
+    input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey, domain,
+    docTypeId, setDocTypeId, refDate, setRefDate
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -43,9 +49,6 @@ export const InputSection: React.FC<InputSectionProps> = ({
   // URL Input State
   const [urlInput, setUrlInput] = useState("");
   const [isScraping, setIsScraping] = useState(false);
-
-  // Document Type State (Legal Mode)
-  const [docTypeId, setDocTypeId] = useState<string>("");
 
   const t = translations[lang];
 
@@ -169,7 +172,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
     setPdfFile(null);
     setPdfDiagnostics(undefined);
     setUrlInput("");
-    setDocTypeId("");
+    if (setDocTypeId) setDocTypeId("");
     setSourceMeta({ title: "", author: "", year: null, language: "", source_type: "legacy_text" });
     setActiveTab("input");
   };
@@ -242,13 +245,23 @@ export const InputSection: React.FC<InputSectionProps> = ({
                 </div>
              ) : (
                  <div className="flex items-center gap-2">
-                     {/* Legal mode uses the large selector in sidebar or metadata panel, 
-                         but for top bar we keep it clean or show a badge */}
-                     <Badge variant="secondary" className="text-[10px]">Legal Mode</Badge>
+                     {/* Temporal Controls */}
+                     {setRefDate && refDate && (
+                         <div className="flex items-center gap-2 bg-background border rounded px-2 py-1 text-xs">
+                             <Calendar className="w-3 h-3 text-muted-foreground" />
+                             <span className="text-muted-foreground">Filing:</span>
+                             <input 
+                                type="date" 
+                                className="bg-transparent border-none p-0 h-auto text-xs w-24 focus:outline-none"
+                                value={refDate.toISOString().split('T')[0]}
+                                onChange={(e) => setRefDate(new Date(e.target.value))}
+                             />
+                         </div>
+                     )}
                  </div>
              )}
            </div>
-            
+           
            {/* Profile Disclaimer */}
            <div className="bg-primary/5 px-4 py-1.5 border-b border-primary/10 flex items-center gap-2 shrink-0">
                 <Info className="w-3 h-3 text-primary/70 shrink-0" />
@@ -260,10 +273,10 @@ export const InputSection: React.FC<InputSectionProps> = ({
            </div>
            
            {/* Legal Doc Type Selector Panel */}
-           {domain === 'legal' && activeTab === 'input' && (
+           {domain === 'legal' && activeTab === 'input' && setDocTypeId && (
                 <div className="bg-muted/5 border-b border-border px-4 py-3 shrink-0">
                     <DocumentTypeSelector 
-                        value={docTypeId}
+                        value={docTypeId || ''}
                         onChange={setDocTypeId}
                         inputPreview={input}
                         apiKey={apiKey}

@@ -1,228 +1,365 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
-import { InputSection } from './components/InputSection';
-import { OutputSection } from './components/OutputSection';
+import { CaseSidebar } from './components/CaseSidebar';
+import { CaseWorkspace } from './components/CaseWorkspace';
+import { CreateCaseDialog } from './components/CreateCaseDialog';
 import { parseIGT } from './services/igtxParser';
-import { ParseReport, LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain } from './types';
+import { IGTXSource, UILanguage, PdfTextDiagnostics, CaseState, CaseEvent, CaseMetadata } from './types';
+import { DocumentTypeService } from './services/documentTypeService';
 import { translations } from './services/translations';
-import { GripVertical, GripHorizontal } from 'lucide-react';
+import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
+import { ChatBot } from './components/ChatBot';
+import { Button } from './components/ui/button';
+import { FileSystemService } from './services/fileSystemService';
+
+const STORAGE_KEY = 'dziltoo_cases_v1';
 
 function App() {
-  const [input, setInput] = useState<string>('');
-  const [report, setReport] = useState<ParseReport | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [domain, setDomain] = useState<ParserDomain>('linguistic');
-  
-  // Initialize profile based on domain
-  const [profile, setProfile] = useState<LanguageProfile>('generic');
-  
   const [lang, setLang] = useState<UILanguage>('en');
   
-  // Initialize API Key with persistence strategy:
+  // API Key
   const [apiKey, setApiKey] = useState<string>(() => {
     let envKey = '';
     try {
       // @ts-ignore
-      if (typeof process !== 'undefined' && process && process.env) {
-        // @ts-ignore
-        envKey = process.env.API_KEY || '';
-      }
+      if (typeof process !== 'undefined' && process && process.env) envKey = process.env.API_KEY || '';
     } catch (e) {}
-
     if (envKey) return envKey;
-
-    if (typeof window !== 'undefined') {
-        return sessionStorage.getItem('gemini_api_key') || '';
-    }
+    if (typeof window !== 'undefined') return sessionStorage.getItem('gemini_api_key') || '';
     return '';
   });
 
-  // --- Split Pane Logic ---
-  const [splitRatio, setSplitRatio] = useState(0.5);
-  const [isResizing, setIsResizing] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Detect mobile/desktop for split direction
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024); // lg breakpoint
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  const startResizing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-  }, []);
-
-  const stopResizing = useCallback(() => {
-    setIsResizing(false);
-  }, []);
-
-  const resize = useCallback((e: MouseEvent | TouchEvent) => {
-    if (isResizing && containerRef.current) {
-      const containerRect = containerRef.current.getBoundingClientRect();
-      let newRatio;
-
-      if (isMobile) {
-        // Vertical Split (Top/Bottom) calculation
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        const offset = clientY - containerRect.top;
-        newRatio = offset / containerRect.height;
-      } else {
-        // Horizontal Split (Left/Right) calculation
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const offset = clientX - containerRect.left;
-        newRatio = offset / containerRect.width;
-      }
-
-      // Clamp ratio to avoid completely hiding panes
-      setSplitRatio(Math.min(Math.max(newRatio, 0.2), 0.8));
-    }
-  }, [isResizing, isMobile]);
-
-  useEffect(() => {
-    if (isResizing) {
-      window.addEventListener('mousemove', resize);
-      window.addEventListener('mouseup', stopResizing);
-      window.addEventListener('touchmove', resize);
-      window.addEventListener('touchend', stopResizing);
-    }
-    return () => {
-      window.removeEventListener('mousemove', resize);
-      window.removeEventListener('mouseup', stopResizing);
-      window.removeEventListener('touchmove', resize);
-      window.removeEventListener('touchend', stopResizing);
-    };
-  }, [isResizing, resize, stopResizing]);
-
-  // Persist API Key
-  useEffect(() => {
-    if (apiKey) {
-      sessionStorage.setItem('gemini_api_key', apiKey);
-    } else {
-      sessionStorage.removeItem('gemini_api_key');
-    }
+    if (apiKey) sessionStorage.setItem('gemini_api_key', apiKey);
+    else sessionStorage.removeItem('gemini_api_key');
   }, [apiKey]);
 
-  // Handle Domain Switch resets
-  useEffect(() => {
-    setReport(null);
-    if (domain === 'legal') {
-        setProfile('legal_pleading');
-    } else {
-        setProfile('generic');
-    }
-  }, [domain]);
+  // --- Case Management State ---
+  const [cases, setCases] = useState<CaseState[]>(() => {
+      // Try load from local storage
+      if (typeof window !== 'undefined') {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+              try {
+                  const parsed = JSON.parse(stored);
+                  // Hydrate dates and reset non-serializable fields (handles)
+                  return parsed.map((c: any) => ({
+                      ...c,
+                      referenceDate: new Date(c.referenceDate),
+                      lastActive: new Date(c.lastActive),
+                      events: c.events.map((e: any) => ({ ...e, timestamp: new Date(e.timestamp) })),
+                      directoryHandle: undefined, // Cannot persist handles
+                      localSyncEnabled: false     // Reset sync status on reload
+                  }));
+              } catch(e) { console.error("Failed to load cases", e); }
+          }
+      }
 
+      // Default blank case
+      return [{
+          id: 'case-' + Date.now(),
+          name: 'Untitled Case 1',
+          domain: 'legal',
+          caseMeta: { type: 'Civil', jurisdiction: '', plaintiffs: [], defendants: [], indexNumber: '' },
+          input: '',
+          report: null,
+          profile: 'legal_pleading',
+          docTypeId: '',
+          referenceDate: new Date(),
+          sourceMeta: { title: '', author: '', year: null, language: '', source_type: 'legacy_text' },
+          events: [],
+          lastActive: new Date(),
+          isProcessing: false,
+          documents: [],
+          exhibits: [],
+          notes: [],
+          localSyncEnabled: false
+      }];
+  });
+
+  const [activeCaseId, setActiveCaseId] = useState<string>(cases[0].id);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+
+  // Persistence Effect
+  useEffect(() => {
+      // We strip out directoryHandle before saving to localStorage
+      const serializableCases = cases.map(c => {
+          const { directoryHandle, ...rest } = c;
+          return rest;
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableCases));
+  }, [cases]);
+
+  // Helper to access active case safely
+  const activeCase = cases.find(c => c.id === activeCaseId) || cases[0];
+
+  const handleCreateCase = (name: string, meta: CaseMetadata, initialDoc?: { name: string, content: string }) => {
+      const newCase: CaseState = {
+          id: 'case-' + Date.now(),
+          name: name,
+          domain: 'legal',
+          caseMeta: meta,
+          input: initialDoc ? initialDoc.content : '',
+          report: null, // Will need to process
+          profile: 'legal_pleading',
+          docTypeId: '', // Could infer
+          referenceDate: new Date(),
+          sourceMeta: { title: initialDoc?.name || name, author: '', year: null, language: '', source_type: 'legacy_text' },
+          events: [],
+          lastActive: new Date(),
+          isProcessing: false,
+          documents: initialDoc ? [{
+              id: Date.now().toString(),
+              name: initialDoc.name,
+              content: initialDoc.content,
+              type: 'application/pdf', // Assumption
+              side: 'neutral',
+              dateAdded: new Date().toISOString()
+          }] : [],
+          exhibits: [],
+          notes: [],
+          localSyncEnabled: false
+      };
+
+      setCases(prev => [...prev, newCase]);
+      setActiveCaseId(newCase.id);
+  };
+
+  const closeCase = (id: string) => {
+      if (cases.length <= 1) return; // Prevent closing last case
+      const newCases = cases.filter(c => c.id !== id);
+      setCases(newCases);
+      if (activeCaseId === id) {
+          setActiveCaseId(newCases[newCases.length - 1].id);
+      }
+  };
+
+  const updateActiveCase = (updates: Partial<CaseState>) => {
+      setCases(prev => prev.map(c => {
+          if (c.id === activeCaseId) {
+              const updated = { ...c, ...updates, lastActive: new Date() };
+              
+              // If local sync is enabled, trigger a save in background
+              if (updated.localSyncEnabled && updated.directoryHandle) {
+                  FileSystemService.syncCaseToLocal(updated, updated.directoryHandle)
+                    .catch(err => console.error("Auto-sync failed:", err));
+              }
+              
+              return updated;
+          }
+          return c;
+      }));
+  };
+
+  // --- Local Folder Sync Handler ---
+  const handleConnectLocalFolder = async () => {
+      if (!FileSystemService.isSupported()) {
+          alert("Your browser does not support Local File System access. Please use Chrome, Edge, or Opera.");
+          return;
+      }
+
+      const dirHandle = await FileSystemService.selectDirectory();
+      if (dirHandle) {
+          updateActiveCase({ 
+              directoryHandle: dirHandle,
+              localSyncEnabled: true
+          });
+          
+          // Initial Sync
+          // We need to pass the updated object directly because state update is async
+          const tempCase = { ...activeCase, directoryHandle: dirHandle, localSyncEnabled: true };
+          try {
+             await FileSystemService.syncCaseToLocal(tempCase, dirHandle);
+             alert(`Successfully connected to folder: ${dirHandle.name}. Docs and Notes will auto-sync.`);
+          } catch(e) {
+             console.error(e);
+             alert("Failed to write to folder. Check permissions.");
+          }
+      }
+  };
+
+  // Switcher Handler
+  const handleSwitchCase = (id: string) => {
+      setActiveCaseId(id);
+      setCases(prev => prev.map(c => c.id === id ? { ...c, lastActive: new Date() } : c));
+  };
+
+  // --- Temporal Logic & Event Engine ---
+  const calculateCaseEvents = (currentCase: CaseState): CaseEvent[] => {
+      const events: CaseEvent[] = [];
+      const now = new Date();
+      const refDate = currentCase.referenceDate;
+
+      // 1. Doc Type Deadlines
+      if (currentCase.domain === 'legal' && currentCase.docTypeId) {
+          const def = DocumentTypeService.getById(currentCase.docTypeId);
+          if (def) {
+             def.deadlines.forEach((dl, idx) => {
+                 const targetDate = new Date(refDate);
+                 targetDate.setDate(refDate.getDate() + dl.duration);
+                 const daysUntil = Math.ceil((targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                 
+                 let type: CaseEvent['type'] = 'info';
+                 if (daysUntil < 0) type = 'error'; 
+                 else if (daysUntil <= 3) type = 'warning';
+
+                 events.push({
+                     id: `dl-${idx}-${now.getTime()}`,
+                     type,
+                     title: dl.isJurisdictional ? `CRITICAL: ${dl.label}` : dl.label,
+                     message: `${dl.isJurisdictional ? 'Jurisdictional deadline' : 'Deadline'} approaching. Due: ${targetDate.toLocaleDateString()} (${daysUntil} days).`,
+                     timestamp: now,
+                     read: false
+                 });
+             });
+          }
+      }
+
+      // 2. Parser Warnings
+      if (currentCase.report) {
+          const warnings = currentCase.report.blocks.flatMap(b => b.warnings).length;
+          if (warnings > 5) {
+              events.push({
+                  id: `warn-${now.getTime()}`,
+                  type: 'warning',
+                  title: 'Low Confidence Parsing',
+                  message: `Parser detected ${warnings} extraction warnings. Manual review recommended.`,
+                  timestamp: now,
+                  read: false
+              });
+          }
+          if (currentCase.report.metadata.tier4Assessment?.requiresTier4) {
+               events.push({
+                  id: `t4-${now.getTime()}`,
+                  type: 'info',
+                  title: 'Tier 4 Detected',
+                  message: currentCase.report.metadata.tier4Assessment.recommendedAction,
+                  timestamp: now,
+                  read: false
+              });
+          }
+      }
+      return events;
+  };
+
+  // Processing Handler
   const handleProcess = (sourceMeta: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics) => {
-    if (!input.trim()) return;
-    setIsProcessing(true);
+    if (!activeCase.input.trim()) return;
+    updateActiveCase({ isProcessing: true, sourceMeta: { ...activeCase.sourceMeta, ...sourceMeta } });
     
-    // Simulate slight delay for "Processing" feel (UI feedback)
     setTimeout(() => {
-      const result = parseIGT(input, profile, domain, sourceMeta, undefined, diagnostics);
-      setReport(result);
-      setIsProcessing(false);
+      const result = parseIGT(
+          activeCase.input, 
+          activeCase.profile, 
+          activeCase.domain, 
+          sourceMeta, 
+          activeCase.name, 
+          diagnostics
+      );
+      
+      setCases(prev => prev.map(c => {
+          if (c.id === activeCaseId) {
+              const updated = { 
+                  ...c, 
+                  report: result, 
+                  isProcessing: false,
+                  pdfDiagnostics: diagnostics || c.pdfDiagnostics
+              };
+              updated.events = calculateCaseEvents(updated);
+              
+              // Trigger sync if enabled
+              if(c.localSyncEnabled && c.directoryHandle) {
+                  FileSystemService.syncCaseToLocal(updated, c.directoryHandle).catch(console.error);
+              }
+              
+              return updated;
+          }
+          return c;
+      }));
     }, 400);
   };
 
   const handleClear = () => {
-    setInput('');
-    setReport(null);
+    updateActiveCase({ input: '', report: null, events: [] });
   };
-
-  const t = translations[lang];
 
   return (
     <div 
       className="h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20 selection:text-primary overflow-hidden"
       dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
-      <Header lang={lang} setLang={setLang} apiKey={apiKey} setApiKey={setApiKey} domain={domain} setDomain={setDomain} />
+      <Header 
+        lang={lang} 
+        setLang={setLang} 
+        apiKey={apiKey} 
+        setApiKey={setApiKey} 
+        domain={activeCase.domain} 
+        setDomain={(d) => updateActiveCase({ domain: d, profile: d === 'legal' ? 'legal_pleading' : 'generic' })}
+        // Local Folder Props
+        isLocalSyncEnabled={activeCase.localSyncEnabled}
+        onConnectLocalFolder={handleConnectLocalFolder}
+        folderName={activeCase.directoryHandle?.name}
+      />
       
-      <main 
-        className="flex-1 w-full max-w-[1920px] mx-auto p-4 md:p-6 overflow-hidden flex flex-col"
-      >
-        <div 
-            ref={containerRef}
-            className={`flex-1 flex ${isMobile ? 'flex-col' : 'flex-row'} relative border border-border/40 rounded-lg overflow-hidden shadow-sm bg-muted/5`}
-        >
-            {/* Input Pane */}
-            <div 
-                style={{ 
-                    flexBasis: `${splitRatio * 100}%`,
-                    flexGrow: 0,
-                    flexShrink: 0,
-                    height: isMobile ? `${splitRatio * 100}%` : '100%',
-                    width: isMobile ? '100%' : `${splitRatio * 100}%`
-                }}
-                className="overflow-hidden min-h-[200px] min-w-[200px]"
-            >
-                <div className="h-full w-full p-2">
-                    <InputSection 
-                        input={input} 
-                        setInput={setInput} 
-                        onProcess={handleProcess}
-                        onClear={handleClear}
-                        profile={profile}
-                        setProfile={setProfile}
-                        lang={lang}
-                        apiKey={apiKey}
-                        domain={domain}
-                    />
+      <main className="flex-1 w-full max-w-[1920px] mx-auto overflow-hidden flex flex-row">
+        
+        {/* Case Sidebar */}
+        <CaseSidebar 
+            cases={cases}
+            activeCaseId={activeCaseId}
+            onSwitchCase={handleSwitchCase}
+            onCreateCase={() => setIsCreateDialogOpen(true)}
+            onCloseCase={closeCase}
+            isOpen={isSidebarOpen}
+            toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        />
+        
+        {/* Sidebar Toggle Handle */}
+        <div className="w-1 bg-border/20 hover:bg-primary/20 cursor-col-resize flex items-center justify-center relative group" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            <div className="absolute left-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="outline" size="icon" className="h-6 w-6 rounded-l-none border-l-0 shadow-sm">
+                   {isSidebarOpen ? <PanelLeftClose className="w-3 h-3" /> : <PanelLeftOpen className="w-3 h-3" />}
+                </Button>
+            </div>
+        </div>
+
+        {/* Main Workspace (Tabs) */}
+        <div className="flex-1 flex flex-col h-full min-w-0">
+            {/* Case Header Info Bar */}
+            <div className="border-b bg-muted/10 px-6 py-2 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                     <h2 className="text-sm font-bold truncate max-w-[300px]">{activeCase.name}</h2>
+                     <div className="flex items-center gap-2">
+                         <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">{activeCase.caseMeta.type}</span>
+                         {activeCase.caseMeta.indexNumber && <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground font-mono">{activeCase.caseMeta.indexNumber}</span>}
+                     </div>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    {activeCase.localSyncEnabled && (
+                        <span className="flex items-center gap-1 text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                            Synced to: {activeCase.directoryHandle?.name}
+                        </span>
+                    )}
+                    <span>{activeCase.caseMeta.jurisdiction || "No jurisdiction set"}</span>
                 </div>
             </div>
 
-            {/* Resizer Handle */}
-            <div
-                className={`
-                    z-30 flex items-center justify-center bg-border/50 hover:bg-primary/50 transition-colors
-                    ${isMobile 
-                        ? 'h-3 w-full cursor-row-resize border-y border-background' 
-                        : 'w-3 h-full cursor-col-resize border-x border-background'
-                    }
-                    ${isResizing ? 'bg-primary' : ''}
-                `}
-                onMouseDown={startResizing}
-                onTouchStart={startResizing}
-            >
-                {isMobile 
-                    ? <GripHorizontal className="w-4 h-4 text-muted-foreground" /> 
-                    : <GripVertical className="w-4 h-4 text-muted-foreground" />
-                }
-            </div>
-
-            {/* Output Pane */}
-            <div 
-                className="flex-1 overflow-hidden min-h-[200px] min-w-[200px] relative"
-            >
-                 <div className="h-full w-full p-2">
-                    {isProcessing && (
-                        <div className="absolute inset-2 bg-background/50 backdrop-blur-[2px] z-20 flex items-center justify-center rounded-lg border border-primary/20">
-                            <div className="flex flex-col items-center gap-4 bg-card p-6 rounded-xl border shadow-xl">
-                                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                                <span className="text-primary font-mono text-xs tracking-widest uppercase animate-pulse">{t.processing}</span>
-                            </div>
-                        </div>
-                    )}
-                    <OutputSection 
-                        report={report} 
-                        onUpdateReport={setReport}
-                        lang={lang} 
-                        apiKey={apiKey}
-                        domain={domain}
-                    />
-                 </div>
+            <div className="flex-1 overflow-hidden">
+                <CaseWorkspace 
+                    caseData={activeCase}
+                    updateCase={updateActiveCase}
+                    onProcess={handleProcess}
+                    onClear={handleClear}
+                    lang={lang}
+                    apiKey={apiKey}
+                />
             </div>
         </div>
       </main>
 
-      <footer className="border-t bg-muted/10 py-3 shrink-0">
+      <footer className="border-t bg-muted/10 py-2 shrink-0">
          <div className="max-w-7xl mx-auto px-4 text-center">
             <p className="text-[10px] text-muted-foreground font-mono">
               &copy; 2025 Talkinggod AI / Talkinggod Labs.
@@ -231,6 +368,33 @@ function App() {
             </p>
          </div>
       </footer>
+      
+      <CreateCaseDialog 
+         isOpen={isCreateDialogOpen}
+         onClose={() => setIsCreateDialogOpen(false)}
+         onCreate={handleCreateCase}
+      />
+
+      {/* AI Chatbot Overlay */}
+      <ChatBot 
+        apiKey={apiKey} 
+        domain={activeCase.domain} 
+        profile={activeCase.profile} 
+        context={activeCase.report?.fullExtractedText || activeCase.input} 
+        onUpdateEditor={(val) => updateActiveCase({ input: val })}
+        caseContext={{
+            id: activeCase.id,
+            name: activeCase.name,
+            docType: activeCase.docTypeId,
+            events: activeCase.events,
+            refDate: activeCase.referenceDate
+        }}
+        // Pass sync info to chatbot so it knows about the local folder
+        localSyncInfo={activeCase.localSyncEnabled ? { 
+            folderName: activeCase.directoryHandle?.name,
+            fileCount: activeCase.documents.length + activeCase.notes.length
+        } : undefined}
+      />
     </div>
   );
 }
