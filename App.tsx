@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { CaseSidebar } from './components/CaseSidebar';
@@ -12,6 +11,7 @@ import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 import { ChatBot } from './components/ChatBot';
 import { Button } from './components/ui/button';
 import { FileSystemService } from './services/fileSystemService';
+import { cn } from './lib/utils';
 
 const STORAGE_KEY = 'dziltoo_cases_v1';
 
@@ -81,6 +81,7 @@ function App() {
   const [activeCaseId, setActiveCaseId] = useState<string>(cases[0].id);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   // Persistence Effect
   useEffect(() => {
@@ -141,8 +142,8 @@ function App() {
           if (c.id === activeCaseId) {
               const updated = { ...c, ...updates, lastActive: new Date() };
               
-              // If local sync is enabled, trigger a save in background
-              if (updated.localSyncEnabled && updated.directoryHandle) {
+              // If local sync is enabled, trigger a save in background (except if we are just setting the handle)
+              if (updated.localSyncEnabled && updated.directoryHandle && !updates.directoryHandle) {
                   FileSystemService.syncCaseToLocal(updated, updated.directoryHandle)
                     .catch(err => console.error("Auto-sync failed:", err));
               }
@@ -162,20 +163,40 @@ function App() {
 
       const dirHandle = await FileSystemService.selectDirectory();
       if (dirHandle) {
+          // 1. Set Handle
           updateActiveCase({ 
               directoryHandle: dirHandle,
               localSyncEnabled: true
           });
           
-          // Initial Sync
-          // We need to pass the updated object directly because state update is async
-          const tempCase = { ...activeCase, directoryHandle: dirHandle, localSyncEnabled: true };
+          setImportStatus("Scanning folder for files...");
+
+          // 2. Scan and Import Files Recursively
           try {
+             const importedDocs = await FileSystemService.importFilesFromDirectory(
+                 dirHandle, 
+                 activeCase.documents,
+                 (status) => setImportStatus(status)
+             );
+             
+             if (importedDocs.length > 0) {
+                 updateActiveCase({
+                     documents: [...activeCase.documents, ...importedDocs]
+                 });
+                 alert(`Successfully connected to "${dirHandle.name}". Imported ${importedDocs.length} new files.`);
+             } else {
+                 alert(`Connected to "${dirHandle.name}". No new compatible files found.`);
+             }
+
+             // 3. Perform initial write-back sync
+             const tempCase = { ...activeCase, directoryHandle: dirHandle, localSyncEnabled: true };
              await FileSystemService.syncCaseToLocal(tempCase, dirHandle);
-             alert(`Successfully connected to folder: ${dirHandle.name}. Docs and Notes will auto-sync.`);
+
           } catch(e) {
              console.error(e);
-             alert("Failed to write to folder. Check permissions.");
+             alert("Failed to process folder contents. Check console for details.");
+          } finally {
+              setImportStatus(null);
           }
       }
   };
@@ -303,21 +324,36 @@ function App() {
         folderName={activeCase.directoryHandle?.name}
       />
       
-      <main className="flex-1 w-full max-w-[1920px] mx-auto overflow-hidden flex flex-row">
+      {importStatus && (
+          <div className="bg-primary/10 text-primary text-xs text-center py-1 animate-pulse font-medium">
+              {importStatus}
+          </div>
+      )}
+
+      <main className="flex-1 w-full max-w-[1920px] mx-auto overflow-hidden flex flex-row relative">
         
         {/* Case Sidebar */}
-        <CaseSidebar 
-            cases={cases}
-            activeCaseId={activeCaseId}
-            onSwitchCase={handleSwitchCase}
-            onCreateCase={() => setIsCreateDialogOpen(true)}
-            onCloseCase={closeCase}
-            isOpen={isSidebarOpen}
-            toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-        />
+        <div className={cn(
+            "h-full transition-all duration-300 absolute z-20 md:static bg-background border-r shadow-xl md:shadow-none",
+            isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+            // On desktop, we control width via the sidebar component props, on mobile we overlay
+        )}>
+             <CaseSidebar 
+                cases={cases}
+                activeCaseId={activeCaseId}
+                onSwitchCase={handleSwitchCase}
+                onCreateCase={() => setIsCreateDialogOpen(true)}
+                onCloseCase={closeCase}
+                isOpen={isSidebarOpen}
+                toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+            />
+        </div>
         
-        {/* Sidebar Toggle Handle */}
-        <div className="w-1 bg-border/20 hover:bg-primary/20 cursor-col-resize flex items-center justify-center relative group" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+        {/* Sidebar Toggle Handle (Desktop) */}
+        <div 
+            className="hidden md:flex w-1 bg-border/20 hover:bg-primary/20 cursor-col-resize items-center justify-center relative group z-10" 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+        >
             <div className="absolute left-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button variant="outline" size="icon" className="h-6 w-6 rounded-l-none border-l-0 shadow-sm">
                    {isSidebarOpen ? <PanelLeftClose className="w-3 h-3" /> : <PanelLeftOpen className="w-3 h-3" />}
@@ -325,13 +361,23 @@ function App() {
             </div>
         </div>
 
+        {/* Mobile Sidebar Toggle Overlay (if open) */}
+        {isSidebarOpen && (
+             <div className="md:hidden fixed inset-0 bg-background/80 backdrop-blur-sm z-10" onClick={() => setIsSidebarOpen(false)} />
+        )}
+
         {/* Main Workspace (Tabs) */}
         <div className="flex-1 flex flex-col h-full min-w-0">
             {/* Case Header Info Bar */}
-            <div className="border-b bg-muted/10 px-6 py-2 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-4">
-                     <h2 className="text-sm font-bold truncate max-w-[300px]">{activeCase.name}</h2>
-                     <div className="flex items-center gap-2">
+            <div className="border-b bg-muted/10 px-4 md:px-6 py-2 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 md:gap-4 overflow-hidden">
+                     {/* Mobile Menu Trigger */}
+                     <Button variant="ghost" size="icon" className="md:hidden h-8 w-8 -ml-2" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+                         <PanelLeftOpen className="w-4 h-4" />
+                     </Button>
+
+                     <h2 className="text-sm font-bold truncate max-w-[200px] md:max-w-[300px]">{activeCase.name}</h2>
+                     <div className="flex items-center gap-2 hidden sm:flex">
                          <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">{activeCase.caseMeta.type}</span>
                          {activeCase.caseMeta.indexNumber && <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground font-mono">{activeCase.caseMeta.indexNumber}</span>}
                      </div>
@@ -342,7 +388,7 @@ function App() {
                             Synced to: {activeCase.directoryHandle?.name}
                         </span>
                     )}
-                    <span>{activeCase.caseMeta.jurisdiction || "No jurisdiction set"}</span>
+                    <span className="hidden sm:inline">{activeCase.caseMeta.jurisdiction || "No jurisdiction"}</span>
                 </div>
             </div>
 

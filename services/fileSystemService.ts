@@ -1,5 +1,5 @@
-
 import { CaseState, StoredDocument, Note } from '../types';
+import { extractTextFromPdf } from './pdfExtractor';
 
 /**
  * Service to interact with the File System Access API.
@@ -16,7 +16,7 @@ interface FileSystemHandle {
 interface FileSystemDirectoryHandle extends FileSystemHandle {
     getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle>;
     getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>;
-    values(): AsyncIterable<FileSystemHandle>;
+    values(): AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle>;
 }
 
 interface FileSystemFileHandle extends FileSystemHandle {
@@ -116,6 +116,80 @@ export const FileSystemService = {
              const filename = `Analysis_${new Date().toISOString().split('T')[0]}.json`;
              await writeFile(reportDir, filename, JSON.stringify(caseData.report.igtxDocument, null, 2));
         }
+    },
+
+    /**
+     * Recursively scans the directory and imports compatible files (PDF, TXT) into StoredDocuments.
+     * Skips files that are already in the case (by name).
+     */
+    importFilesFromDirectory: async (
+        dirHandle: FileSystemDirectoryHandle, 
+        existingDocs: StoredDocument[],
+        onProgress?: (msg: string) => void
+    ): Promise<StoredDocument[]> => {
+        const newDocs: StoredDocument[] = [];
+        
+        async function traverse(handle: FileSystemDirectoryHandle | FileSystemFileHandle, path: string) {
+            if (handle.kind === 'file') {
+                const fileHandle = handle as FileSystemFileHandle;
+                
+                // Skip system files or metadata
+                if (fileHandle.name.startsWith('.') || fileHandle.name === 'case_metadata.json') return;
+                
+                // Check if already exists
+                if (existingDocs.some(d => d.name === fileHandle.name) || newDocs.some(d => d.name === fileHandle.name)) {
+                    return;
+                }
+
+                const file = await fileHandle.getFile();
+                const type = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
+                
+                // Filter for compatible types (Text, PDF, Markdown)
+                // We also allow images but store them with a placeholder text for now as the app is text-centric
+                if (
+                    type.includes('pdf') || 
+                    type.includes('text') || 
+                    file.name.endsWith('.md') || 
+                    file.name.endsWith('.ts') || 
+                    file.name.endsWith('.json') ||
+                    type.includes('image')
+                ) {
+                    if (onProgress) onProgress(`Importing ${file.name}...`);
+                    
+                    let content = "";
+                    if (type.includes('pdf')) {
+                        try {
+                            const res = await extractTextFromPdf(file);
+                            content = res.text;
+                        } catch (e) {
+                            content = `[Error extracting PDF: ${e}]`;
+                        }
+                    } else if (type.includes('image')) {
+                         content = `[Image File: ${file.name}] (OCR not yet run automatically)`;
+                    } else {
+                        content = await file.text();
+                    }
+
+                    newDocs.push({
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                        name: file.name,
+                        type: type,
+                        content: content,
+                        side: 'neutral', // Default
+                        dateAdded: new Date().toISOString()
+                    });
+                }
+            } else if (handle.kind === 'directory') {
+                const dir = handle as FileSystemDirectoryHandle;
+                // @ts-ignore
+                for await (const entry of dir.values()) {
+                    await traverse(entry, `${path}/${entry.name}`);
+                }
+            }
+        }
+
+        await traverse(dirHandle, '');
+        return newDocs;
     },
 
     /**

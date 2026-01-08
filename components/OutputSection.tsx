@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParseReport, ParserDomain } from '../types';
 import { generateExportContent, ExportFormat } from '../services/exportService';
 import { enrichReportWithSemantics } from '../services/aiService';
-import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink } from 'lucide-react';
+import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink, GitBranch } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
@@ -319,6 +320,19 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                        <div className="text-sm font-medium text-primary mb-2 font-mono break-words bg-primary/5 p-2 rounded overflow-x-auto whitespace-pre" dir="ltr">
                          {block.extractedLanguageLine}
                        </div>
+
+                       {/* NEW: Structure Analysis Visualization */}
+                       {block.structural && (
+                            <div className="flex items-center gap-2 mt-2">
+                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-normal flex items-center gap-1">
+                                    <GitBranch className="w-3 h-3" />
+                                    {block.structural.clauseType.replace('_', ' ')}
+                                </Badge>
+                                <span className="text-[9px] text-muted-foreground">
+                                    Complexity: <span className="font-mono">{block.structural.complexityScore}</span>
+                                </span>
+                            </div>
+                       )}
 
                         {/* Semantic State Display (Linguistic) */}
                         {block.semantic_state?.predicate && domain === 'linguistic' && (

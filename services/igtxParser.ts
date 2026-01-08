@@ -59,6 +59,143 @@ function generateHash(str: string): string {
 }
 
 /**
+ * Analyzes the structural complexity of a line to determine clause types.
+ * refined to detect multiclausal structures via punctuation, conjunctions, and verb patterns.
+ */
+function analyzeStructure(text: string, domain: ParserDomain = 'linguistic'): StructuralAnalysis {
+    const cleanText = text.trim();
+    const tokens = cleanText.split(/\s+/);
+    const tokenCount = tokens.length;
+    const charCount = cleanText.length;
+    const avgTokenLength = tokenCount > 0 ? charCount / tokenCount : 0;
+
+    // --- Heuristic Detection Config ---
+    
+    // Punctuation that strongly suggests clause boundaries
+    const strongSeparators = /[:;—|]|\s-\s/g;
+    const strongSepCount = (cleanText.match(strongSeparators) || []).length;
+    
+    // Explicit embedding markers (Parentheses, Brackets)
+    const embeddingMarkers = (cleanText.match(/[\(\[\{]/g) || []).length;
+    
+    // Conjunctions & Relative Pronouns (English/Generic bias for "Language Agnostic" default)
+    // Ideally these would be loaded from a language profile, but these cover high-frequency patterns.
+    const coordConjRegex = /\b(and|but|or|nor|for|yet|so)\b/i;
+    const subordConjRegex = /\b(because|although|if|when|while|unless|since|after|before|until)\b/i;
+    const relativePronounRegex = /\b(that|which|who|whom|whose|where)\b/i;
+    const conditionalRegex = /^(if|provided that|unless|subject to|notwithstanding)/i;
+    
+    // Verb auxiliary hints (rough generic heuristic)
+    const auxVerbRegex = /\b(is|are|was|were|have|has|had|do|does|did|will|would|shall|should|can|could|may|might|must)\b/i;
+
+    let clauseType: StructuralAnalysis['clauseType'] = 'simple';
+    let complexity = 0.1;
+
+    // --- Classification Logic ---
+
+    // 1. Fragment Detection
+    // Very short, no terminal punctuation, no verb-like structure
+    if (tokenCount < 4 && !/[.?!]$/.test(cleanText) && !auxVerbRegex.test(cleanText)) {
+        clauseType = 'fragment';
+        complexity = 0.1;
+    }
+    
+    // 2. Complex/Embedded (High Priority)
+    // Parentheses are the strongest signal of embedding in IGT/Academic text
+    else if (embeddingMarkers > 0) {
+        clauseType = 'complex_embedded';
+        complexity = 0.8 + (embeddingMarkers * 0.05);
+    }
+    
+    // 3. Chain Clause (Strong Punctuation)
+    else if (strongSepCount > 0) {
+        if (strongSepCount > 1) {
+            clauseType = 'chain_clause';
+            complexity = 0.7 + (strongSepCount * 0.1);
+        } else {
+            // Check if the separator balances two substantial chunks
+            clauseType = 'compound'; // e.g. "He arrived; then he left."
+            complexity = 0.6;
+        }
+    }
+    
+    // 4. Compound vs Complex (Comma + Conjunction Analysis)
+    else {
+        const hasCoord = coordConjRegex.test(cleanText);
+        const hasSubord = subordConjRegex.test(cleanText);
+        const hasRelative = relativePronounRegex.test(cleanText);
+        const hasConditional = conditionalRegex.test(cleanText);
+        const commaCount = (cleanText.match(/,/g) || []).length;
+
+        if (hasSubord || hasConditional) {
+            clauseType = 'complex_embedded';
+            complexity = 0.85; // Boost for conditionals/subordination
+        } else if (hasRelative && commaCount > 0) {
+            // "The man, who was tall, left." -> Embedded
+            clauseType = 'complex_embedded';
+            complexity = 0.7;
+        } else if (hasCoord && commaCount > 0) {
+            // "I went to the store, and I bought milk." -> Compound
+            // Heuristic: Comma followed somewhat closely by coordinating conjunction
+            if (/,\s+(\w+\s+){0,3}(and|but|or|nor|for|yet|so)\b/i.test(cleanText)) {
+                clauseType = 'compound';
+                complexity = 0.6;
+            } else {
+                // Comma list (Simple structure with enumeration)
+                clauseType = 'simple';
+                complexity = 0.4;
+            }
+        } else if (commaCount > 2) {
+            // Heavy listing
+            clauseType = 'chain_clause'; // Treat lists as chains for processing purposes
+            complexity = 0.5;
+        } else {
+            // Default Simple
+            clauseType = 'simple';
+            // Scale complexity by length (longer sentences are inherently more complex)
+            complexity = 0.2 + Math.min(0.3, tokenCount * 0.015);
+        }
+    }
+
+    // --- Domain Specific Overrides ---
+    if (domain === 'legal') {
+        // Legal Pleading Structure Detection
+        
+        // "Wherefore" clauses are typically chains of requests
+        if (/^WHEREFORE/i.test(cleanText)) {
+            clauseType = 'chain_clause';
+            complexity = 0.9;
+        }
+        
+        // Recitals (Whereas...)
+        if (/^WHEREAS/i.test(cleanText)) {
+            clauseType = 'complex_embedded';
+            complexity = 0.85;
+        }
+
+        // Citations usually shouldn't be treated as complex sentences even if they have punctuation
+        if (/\d+\s+U\.?S\.?\s+\d+/.test(cleanText) || /v\./.test(cleanText)) {
+            // Adjust complexity down if it's primarily a citation
+            complexity = Math.max(0.3, complexity - 0.2);
+        }
+
+        // Detect "If/Then" logic implicitly often found in contracts
+        if (conditionalRegex.test(cleanText)) {
+             // Force complex detection for legal logic
+             clauseType = 'complex_embedded';
+             complexity = Math.max(complexity, 0.8);
+        }
+    }
+
+    return {
+        complexityScore: Math.min(0.99, parseFloat(complexity.toFixed(2))),
+        clauseType,
+        tokenCount,
+        avgTokenLength: parseFloat(avgTokenLength.toFixed(2))
+    };
+}
+
+/**
  * Heuristic extractor to auto-fill case metadata from a commencing document.
  */
 export function extractCaseInitialMetadata(text: string): CaseMetadata {
@@ -256,12 +393,7 @@ export function parseIGT(
       const cleanLine = trimmed.replace(CLEAN_LINE_REGEX, '');
       const blockHash = generateHash(trimmed + index); 
       
-      const structural: StructuralAnalysis = {
-         complexityScore: 0.1,
-         clauseType: 'simple',
-         tokenCount: cleanLine.split(' ').length,
-         avgTokenLength: cleanLine.length / (cleanLine.split(' ').length || 1)
-      };
+      const structural = analyzeStructure(cleanLine, domain);
 
       blocks.push({
         id: `blk-${blockHash}`, 

@@ -10,6 +10,7 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { extractTextFromPdf } from '../services/pdfExtractor';
+import { ResizableSplitView } from './ui/ResizableSplitView';
 
 interface CaseWorkspaceProps {
     caseData: CaseState;
@@ -93,22 +94,22 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     return (
         <div className="flex flex-col h-full bg-background">
             {/* Case Workspace Navigation */}
-            <div className="border-b bg-background px-4 py-2 flex items-center gap-4 shrink-0">
+            <div className="border-b bg-background px-4 py-2 flex items-center gap-4 shrink-0 overflow-x-auto">
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <TabsList className="bg-muted/40 h-10 w-full justify-start gap-4 px-2">
                         <TabsTrigger value="analysis" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <Scale className="w-4 h-4" /> Analysis
+                            <Scale className="w-4 h-4" /> <span className="hidden sm:inline">Analysis</span>
                         </TabsTrigger>
                         <TabsTrigger value="documents" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <Files className="w-4 h-4" /> Documents
+                            <Files className="w-4 h-4" /> <span className="hidden sm:inline">Documents</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.documents.length}</Badge>
                         </TabsTrigger>
                         <TabsTrigger value="exhibits" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <Image className="w-4 h-4" /> Exhibits
+                            <Image className="w-4 h-4" /> <span className="hidden sm:inline">Exhibits</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.exhibits.length}</Badge>
                         </TabsTrigger>
                         <TabsTrigger value="notes" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <StickyNote className="w-4 h-4" /> Notes
+                            <StickyNote className="w-4 h-4" /> <span className="hidden sm:inline">Notes</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.notes.length}</Badge>
                         </TabsTrigger>
                     </TabsList>
@@ -117,53 +118,59 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
 
             <div className="flex-1 overflow-hidden relative">
                 
-                {/* 1. ANALYSIS TAB (Existing Editor) */}
+                {/* 1. ANALYSIS TAB (Resizable Split View) */}
                 {activeTab === 'analysis' && (
-                    <div className="h-full flex flex-col md:flex-row gap-4 p-4 animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex-1 h-full min-w-0 flex flex-col gap-2">
-                            <h3 className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2">
-                                <FileText className="w-3 h-3" /> Active Document
-                            </h3>
-                             <div className="flex-1 min-h-0 border rounded-lg overflow-hidden shadow-sm">
-                                <InputSection 
-                                    input={caseData.input} 
-                                    setInput={(val) => updateCase({ input: val })} 
-                                    onProcess={onProcess}
-                                    onClear={onClear}
-                                    profile={caseData.profile}
-                                    setProfile={(p) => updateCase({ profile: p })}
-                                    lang={lang}
-                                    apiKey={apiKey}
-                                    domain={caseData.domain}
-                                    docTypeId={caseData.docTypeId}
-                                    setDocTypeId={(id) => updateCase({ docTypeId: id })}
-                                    refDate={caseData.referenceDate}
-                                    setRefDate={(d) => updateCase({ referenceDate: d })}
-                                />
-                             </div>
-                        </div>
-                        <div className="flex-1 h-full min-w-0 flex flex-col gap-2">
-                            <h3 className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2">
-                                <Scale className="w-3 h-3" /> Legal Extraction
-                            </h3>
-                            <div className="flex-1 min-h-0 border rounded-lg overflow-hidden shadow-sm">
-                                <OutputSection 
-                                    report={caseData.report} 
-                                    onUpdateReport={(r) => updateCase({ report: r })}
-                                    lang={lang} 
-                                    apiKey={apiKey}
-                                    domain={caseData.domain}
-                                />
-                            </div>
-                        </div>
+                    <div className="h-full w-full animate-in fade-in zoom-in-95 duration-200">
+                        <ResizableSplitView
+                            left={
+                                <div className="h-full flex flex-col p-2 md:p-4 gap-2">
+                                    <h3 className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2 px-1">
+                                        <FileText className="w-3 h-3" /> Active Document
+                                    </h3>
+                                    <div className="flex-1 min-h-0 border rounded-lg overflow-hidden shadow-sm bg-card">
+                                        <InputSection 
+                                            input={caseData.input} 
+                                            setInput={(val) => updateCase({ input: val })} 
+                                            onProcess={onProcess}
+                                            onClear={onClear}
+                                            profile={caseData.profile}
+                                            setProfile={(p) => updateCase({ profile: p })}
+                                            lang={lang}
+                                            apiKey={apiKey}
+                                            domain={caseData.domain}
+                                            docTypeId={caseData.docTypeId}
+                                            setDocTypeId={(id) => updateCase({ docTypeId: id })}
+                                            refDate={caseData.referenceDate}
+                                            setRefDate={(d) => updateCase({ referenceDate: d })}
+                                        />
+                                    </div>
+                                </div>
+                            }
+                            right={
+                                <div className="h-full flex flex-col p-2 md:p-4 gap-2">
+                                    <h3 className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2 px-1">
+                                        <Scale className="w-3 h-3" /> Legal Extraction
+                                    </h3>
+                                    <div className="flex-1 min-h-0 border rounded-lg overflow-hidden shadow-sm bg-card">
+                                        <OutputSection 
+                                            report={caseData.report} 
+                                            onUpdateReport={(r) => updateCase({ report: r })}
+                                            lang={lang} 
+                                            apiKey={apiKey}
+                                            domain={caseData.domain}
+                                        />
+                                    </div>
+                                </div>
+                            }
+                        />
                     </div>
                 )}
 
                 {/* 2. DOCUMENTS TAB */}
                 {activeTab === 'documents' && (
-                    <div className="h-full p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="h-full p-4 md:p-6 animate-in fade-in slide-in-from-bottom-2 duration-300 overflow-y-auto">
                         <div className="max-w-5xl mx-auto h-full flex flex-col gap-4">
-                            <div className="flex justify-between items-center">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                                 <div className="flex items-center gap-2 bg-muted/30 p-1 rounded-lg">
                                     <Button 
                                         variant="ghost" 
@@ -184,19 +191,21 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                         onClick={() => setDocFilter('defendant')}
                                     >Defendant</Button>
                                 </div>
-                                <Button size="sm" onClick={() => fileInputRef.current?.click()}>
-                                    <Plus className="w-4 h-4 mr-2" /> Upload Document
-                                </Button>
-                                <input 
-                                    type="file" 
-                                    className="hidden" 
-                                    ref={fileInputRef}
-                                    accept=".pdf,.txt"
-                                    onChange={(e) => e.target.files?.[0] && handleAddDocument(e.target.files[0])} 
-                                />
+                                <div className="flex gap-2 w-full sm:w-auto">
+                                    <Button size="sm" onClick={() => fileInputRef.current?.click()} className="flex-1 sm:flex-none">
+                                        <Plus className="w-4 h-4 mr-2" /> Upload Document
+                                    </Button>
+                                    <input 
+                                        type="file" 
+                                        className="hidden" 
+                                        ref={fileInputRef}
+                                        accept=".pdf,.txt"
+                                        onChange={(e) => e.target.files?.[0] && handleAddDocument(e.target.files[0])} 
+                                    />
+                                </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                            <div className="flex-1 space-y-2">
                                 {caseData.documents.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center h-64 text-muted-foreground border-2 border-dashed rounded-xl">
                                         <Files className="w-10 h-10 mb-2 opacity-50" />
@@ -206,27 +215,27 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                     caseData.documents
                                         .filter(d => docFilter === 'all' || d.side === docFilter)
                                         .map(doc => (
-                                        <div key={doc.id} className="flex items-center justify-between p-4 bg-card border rounded-lg hover:border-primary/50 transition-colors group">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 bg-primary/5 rounded-lg flex items-center justify-center text-primary">
+                                        <div key={doc.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-card border rounded-lg hover:border-primary/50 transition-colors group gap-4">
+                                            <div className="flex items-center gap-4 w-full sm:w-auto overflow-hidden">
+                                                <div className="w-10 h-10 bg-primary/5 rounded-lg flex items-center justify-center text-primary shrink-0">
                                                     <FileText className="w-5 h-5" />
                                                 </div>
-                                                <div>
-                                                    <h4 className="font-medium text-sm">{doc.name}</h4>
-                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                                                <div className="min-w-0 flex-1">
+                                                    <h4 className="font-medium text-sm truncate">{doc.name}</h4>
+                                                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-0.5">
                                                         <span>{new Date(doc.dateAdded).toLocaleDateString()}</span>
-                                                        <span>•</span>
-                                                        <span className="uppercase">{doc.type}</span>
-                                                        <span>•</span>
+                                                        <span className="hidden sm:inline">•</span>
+                                                        <span className="uppercase text-[10px] bg-muted px-1 rounded">{doc.type.split('/')[1] || doc.type}</span>
+                                                        <span className="hidden sm:inline">•</span>
                                                         <Badge variant="outline" className="text-[9px] h-4">{doc.side}</Badge>
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <Button size="sm" variant="secondary" onClick={() => loadDocumentToAnalysis(doc)}>
+                                            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                                                <Button size="sm" variant="secondary" onClick={() => loadDocumentToAnalysis(doc)} className="flex-1 sm:flex-none">
                                                     Analyze
                                                 </Button>
-                                                <Button size="icon" variant="ghost" onClick={() => deleteDocument(doc.id)}>
+                                                <Button size="icon" variant="ghost" onClick={() => deleteDocument(doc.id)} className="shrink-0">
                                                     <Trash2 className="w-4 h-4 text-destructive" />
                                                 </Button>
                                             </div>
@@ -240,9 +249,9 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
 
                 {/* 3. NOTES TAB */}
                 {activeTab === 'notes' && (
-                    <div className="h-full flex gap-0 divide-x animate-in fade-in slide-in-from-right-2 duration-300">
+                    <div className="h-full flex flex-col md:flex-row gap-0 md:divide-x animate-in fade-in slide-in-from-right-2 duration-300">
                         {/* Sidebar List */}
-                        <div className="w-64 flex flex-col bg-muted/10 h-full">
+                        <div className="w-full md:w-64 flex flex-col bg-muted/10 h-1/3 md:h-full shrink-0 border-b md:border-b-0">
                             <div className="p-4 border-b">
                                 <h3 className="text-sm font-semibold mb-2">My Notes</h3>
                                 <Button size="sm" className="w-full justify-start" onClick={handleAddNote} disabled={!newNote.trim()}>
