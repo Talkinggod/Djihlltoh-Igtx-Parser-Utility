@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { ParseReport, ParserDomain } from "../types";
 import { DocumentTypeService } from "./documentTypeService";
@@ -5,7 +6,7 @@ import { DocumentTypeService } from "./documentTypeService";
 const BATCH_SIZE = 5;
 
 // Tool Definition for writing to editor
-const writeEditorTool: FunctionDeclaration = {
+export const writeEditorTool: FunctionDeclaration = {
     name: "write_to_editor",
     description: "Overwrites the main application editor with the provided text content. Use this to generate full legal documents, templates, drafting motions, or linguistic gloss examples for the user.",
     parameters: {

@@ -1,11 +1,12 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
+import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
-import { sendChatMessage } from '../services/aiService';
+import { sendChatMessage, writeEditorTool } from '../services/aiService';
 import { ParserDomain, LanguageProfile, CaseEvent } from '../types';
+import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 
 interface ChatBotProps {
     apiKey: string;
@@ -54,6 +55,14 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
 
     const activeEvents = caseContext?.events.filter(e => !e.read && (e.type === 'error' || e.type === 'deadline')) || [];
 
+    // --- Live API State ---
+    const [isLive, setIsLive] = useState(false);
+    const inputAudioContextRef = useRef<AudioContext | null>(null);
+    const outputAudioContextRef = useRef<AudioContext | null>(null);
+    const sessionPromiseRef = useRef<Promise<any> | null>(null);
+    const nextStartTimeRef = useRef<number>(0);
+    const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+
     // Auto-scroll to bottom
     useEffect(() => {
         if (isOpen) {
@@ -72,6 +81,216 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
             timestamp: new Date()
         }]);
     }, [domain]);
+
+    // --- AUDIO UTILS ---
+    function b64ToUint8Array(base64: string) {
+        const binaryString = atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+    }
+
+    function createPCM16Blob(inputData: Float32Array): { data: string; mimeType: string } {
+        const l = inputData.length;
+        const int16 = new Int16Array(l);
+        for (let i = 0; i < l; i++) {
+            int16[i] = inputData[i] * 32768;
+        }
+        
+        let binary = '';
+        const bytes = new Uint8Array(int16.buffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        const b64 = btoa(binary);
+
+        return {
+            data: b64,
+            mimeType: 'audio/pcm;rate=16000',
+        };
+    }
+
+    async function decodeAudioData(base64: string, ctx: AudioContext): Promise<AudioBuffer> {
+        const bytes = b64ToUint8Array(base64);
+        const dataInt16 = new Int16Array(bytes.buffer);
+        const numChannels = 1;
+        const sampleRate = 24000;
+        const frameCount = dataInt16.length / numChannels;
+        const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+        
+        const channelData = buffer.getChannelData(0);
+        for (let i = 0; i < frameCount; i++) {
+            channelData[i] = dataInt16[i] / 32768.0;
+        }
+        return buffer;
+    }
+
+    // --- LIVE API HANDLERS ---
+    const connectLive = async () => {
+        if (!apiKey) {
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'model',
+                text: "Please enter your Gemini API Key in the top header to use Voice Mode.",
+                timestamp: new Date()
+            }]);
+            return;
+        }
+
+        setIsLive(true);
+
+        try {
+            const ai = new GoogleGenAI({ apiKey });
+            
+            // Setup Audio Contexts
+            const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+            inputAudioContextRef.current = inputCtx;
+            outputAudioContextRef.current = outputCtx;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+            // Prepare System Instruction
+            let systemInstruction = domain === 'legal'
+                ? "You are the Voice Assistant for Dziłtǫ́ǫ́ Legal Studio. Be concise, professional, and helpful with legal drafting and procedure. You can draft documents."
+                : "You are the Voice Assistant for Dziłtǫ́ǫ́ IGT Parser. Help with linguistics.";
+            
+            if (context) systemInstruction += `\nContext: ${context.slice(0, 1000)}...`;
+
+            // Connect
+            const sessionPromise = ai.live.connect({
+                model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+                callbacks: {
+                    onopen: async () => {
+                        console.log("Live Session Opened");
+                        // Setup Input Stream
+                        const source = inputCtx.createMediaStreamSource(stream);
+                        const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+                        
+                        processor.onaudioprocess = (e) => {
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            const pcmData = createPCM16Blob(inputData);
+                            sessionPromise.then(session => {
+                                session.sendRealtimeInput({ media: pcmData });
+                            });
+                        };
+                        
+                        source.connect(processor);
+                        processor.connect(inputCtx.destination);
+                    },
+                    onmessage: async (msg: LiveServerMessage) => {
+                        const serverContent = msg.serverContent;
+                        
+                        // Handle Turn Complete (Transcription updates)
+                        if (serverContent?.turnComplete) {
+                            // No-op for now, we rely on incremental transcription or just audio
+                        }
+
+                        // Handle Transcriptions
+                        if (serverContent?.modelTurn?.parts?.[0]?.text) {
+                            // Text output from model (rare in audio mode unless specified)
+                        }
+
+                        // Handle Tool Calls
+                        if (msg.toolCall) {
+                             for (const fc of msg.toolCall.functionCalls) {
+                                 if (fc.name === 'write_to_editor') {
+                                     const content = (fc.args as any).content;
+                                     if (content && onUpdateEditor) {
+                                         onUpdateEditor(content);
+                                         setMessages(prev => [...prev, {
+                                             id: Date.now().toString(),
+                                             role: 'model',
+                                             text: "[Drafted Document via Voice Command]",
+                                             timestamp: new Date(),
+                                             action: "Document Drafted"
+                                         }]);
+                                     }
+                                     // Send response back
+                                     sessionPromise.then(session => session.sendToolResponse({
+                                         functionResponses: {
+                                             name: fc.name,
+                                             id: fc.id,
+                                             response: { result: "ok" }
+                                         }
+                                     }));
+                                 }
+                             }
+                        }
+
+                        // Handle Audio Output
+                        const audioData = serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                        if (audioData && outputAudioContextRef.current) {
+                            const ctx = outputAudioContextRef.current;
+                            nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+                            
+                            const buffer = await decodeAudioData(audioData, ctx);
+                            const source = ctx.createBufferSource();
+                            source.buffer = buffer;
+                            source.connect(ctx.destination);
+                            
+                            source.addEventListener('ended', () => {
+                                sourcesRef.current.delete(source);
+                            });
+                            
+                            source.start(nextStartTimeRef.current);
+                            nextStartTimeRef.current += buffer.duration;
+                            sourcesRef.current.add(source);
+                        }
+                    },
+                    onclose: () => {
+                        console.log("Live Session Closed");
+                        setIsLive(false);
+                    },
+                    onerror: (e) => {
+                        console.error("Live Session Error", e);
+                        setIsLive(false);
+                        setMessages(prev => [...prev, {
+                             id: Date.now().toString(),
+                             role: 'model',
+                             text: "Voice session error. Please reconnect.",
+                             timestamp: new Date()
+                        }]);
+                    }
+                },
+                config: {
+                    responseModalities: [Modality.AUDIO],
+                    systemInstruction: systemInstruction,
+                    tools: [{ functionDeclarations: [writeEditorTool] }],
+                    inputAudioTranscription: { model: "google-speech-v2" }, 
+                    outputAudioTranscription: { model: "google-speech-v2" } // Keep simple
+                }
+            });
+
+            sessionPromiseRef.current = sessionPromise;
+
+        } catch (e: any) {
+            console.error(e);
+            setIsLive(false);
+        }
+    };
+
+    const disconnectLive = async () => {
+        setIsLive(false);
+        if (sessionPromiseRef.current) {
+            const session = await sessionPromiseRef.current;
+            session.close();
+            sessionPromiseRef.current = null;
+        }
+        
+        if (inputAudioContextRef.current) inputAudioContextRef.current.close();
+        if (outputAudioContextRef.current) outputAudioContextRef.current.close();
+        
+        // Stop all playing audio
+        sourcesRef.current.forEach(s => s.stop());
+        sourcesRef.current.clear();
+        nextStartTimeRef.current = 0;
+    };
+
 
     const handleSend = async () => {
         if (!input.trim()) return;
@@ -205,6 +424,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                         <div className="flex-1">
                             <h3 className="text-sm font-semibold flex items-center gap-2">
                                 {domain === 'legal' ? "Legal Studio Assistant" : "Linguistic Assistant"}
+                                {isLive && <Badge variant="outline" className="text-[9px] bg-red-500/10 text-red-500 border-red-500/30 animate-pulse">LIVE</Badge>}
                             </h3>
                             <p className="text-[10px] text-muted-foreground truncate max-w-[200px]">
                                 {caseContext ? `Context: ${caseContext.name}` : "No case active"}
@@ -220,6 +440,12 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
 
                     {/* Messages Area */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                         {isLive && messages.length === 0 && (
+                             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+                                 <Volume2 className="w-8 h-8 animate-pulse" />
+                                 <p className="text-sm">Listening...</p>
+                             </div>
+                         )}
                         {messages.map((msg) => (
                             <div 
                                 key={msg.id} 
@@ -282,30 +508,61 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
 
                     {/* Input Area */}
                     <div className="p-3 border-t bg-background shrink-0">
-                        <div className="relative flex items-center">
-                            <input
-                                type="text"
-                                className="w-full bg-muted/30 border border-input rounded-md pl-4 pr-12 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
-                                placeholder={domain === 'legal' ? "Ask about deadlines or drafting..." : "Ask about glossing rules..."}
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={handleKeyDown}
-                                disabled={isLoading}
-                                autoFocus
-                            />
-                            <Button 
-                                size="icon" 
-                                className="absolute right-1.5 h-8 w-8"
-                                onClick={handleSend}
-                                disabled={!input.trim() || isLoading}
-                            >
-                                {isLoading ? <Sparkles className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                            </Button>
-                        </div>
-                        <div className="text-[9px] text-center text-muted-foreground mt-2 flex items-center justify-center gap-1 opacity-70">
-                            <Sparkles className="w-2.5 h-2.5" />
-                            <span>AI is aware of your case context.</span>
-                        </div>
+                        {isLive ? (
+                            <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-md p-2">
+                                <div className="flex items-center gap-3">
+                                    <div className="relative">
+                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                         <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-red-500">Voice Mode Active</span>
+                                </div>
+                                <Button size="sm" variant="destructive" onClick={isLive ? disconnectLive : connectLive} className="h-8">
+                                    End Session
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="relative flex items-center gap-2">
+                                <Button 
+                                    size="icon" 
+                                    variant={isLive ? "destructive" : "outline"} 
+                                    className="h-9 w-9 shrink-0"
+                                    onClick={isLive ? disconnectLive : connectLive}
+                                    title="Start Voice Mode"
+                                >
+                                    {isLive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                                </Button>
+                                
+                                <div className="relative flex-1">
+                                    <input
+                                        type="text"
+                                        className="w-full bg-muted/30 border border-input rounded-md pl-4 pr-10 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50 h-9"
+                                        placeholder={domain === 'legal' ? "Ask about deadlines or drafting..." : "Ask about glossing rules..."}
+                                        value={input}
+                                        onChange={(e) => setInput(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        disabled={isLoading}
+                                        autoFocus
+                                    />
+                                    <Button 
+                                        size="icon" 
+                                        className="absolute right-0.5 top-0.5 h-8 w-8"
+                                        variant="ghost"
+                                        onClick={handleSend}
+                                        disabled={!input.trim() || isLoading}
+                                    >
+                                        {isLoading ? <Sparkles className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {!isLive && (
+                             <div className="text-[9px] text-center text-muted-foreground mt-2 flex items-center justify-center gap-1 opacity-70">
+                                <Sparkles className="w-2.5 h-2.5" />
+                                <span>AI is aware of your case context.</span>
+                            </div>
+                        )}
                     </div>
                 </Card>
             )}
