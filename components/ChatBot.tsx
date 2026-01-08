@@ -62,6 +62,11 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
     const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const nextStartTimeRef = useRef<number>(0);
     const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+    
+    // Audio Visualization
+    const analyserRef = useRef<AnalyserNode | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const animationFrameRef = useRef<number | null>(null);
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -129,6 +134,39 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
         return buffer;
     }
 
+    const drawVisualizer = () => {
+        if (!canvasRef.current || !analyserRef.current) return;
+        const canvas = canvasRef.current;
+        const canvasCtx = canvas.getContext('2d');
+        if (!canvasCtx) return;
+        
+        const bufferLength = analyserRef.current.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        const draw = () => {
+            if (!analyserRef.current) return;
+            animationFrameRef.current = requestAnimationFrame(draw);
+            analyserRef.current.getByteFrequencyData(dataArray);
+            
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const barWidth = (canvas.width / bufferLength) * 2.5;
+            let barHeight;
+            let x = 0;
+            
+            for(let i = 0; i < bufferLength; i++) {
+                barHeight = dataArray[i] / 2;
+                
+                // Use theme red for active voice
+                canvasCtx.fillStyle = `rgba(239, 68, 68, ${barHeight / 100})`; 
+                canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                
+                x += barWidth + 1;
+            }
+        };
+        draw();
+    };
+
     // --- LIVE API HANDLERS ---
     const connectLive = async () => {
         if (!apiKey) {
@@ -154,6 +192,16 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
+            // Setup Visualizer
+            const analyser = inputCtx.createAnalyser();
+            analyser.fftSize = 64; // Low res for simple bar chart
+            const source = inputCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            analyserRef.current = analyser;
+
+            // Start visualizer loop after a short delay to ensure canvas is mounted
+            setTimeout(drawVisualizer, 100);
+
             // Prepare System Instruction
             let systemInstruction = domain === 'legal'
                 ? "You are the Voice Assistant for Dziłtǫ́ǫ́ Legal Studio. Be concise, professional, and helpful with legal drafting and procedure. You can draft documents."
@@ -168,7 +216,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                     onopen: async () => {
                         console.log("Live Session Opened");
                         // Setup Input Stream
-                        const source = inputCtx.createMediaStreamSource(stream);
+                        // Note: source is already created for visualizer, we can reuse or branch
+                        // But ScriptProcessor needs to be connected
                         const processor = inputCtx.createScriptProcessor(4096, 1, 1);
                         
                         processor.onaudioprocess = (e) => {
@@ -179,22 +228,13 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                             });
                         };
                         
+                        // Re-route source -> processor -> dest
                         source.connect(processor);
                         processor.connect(inputCtx.destination);
                     },
                     onmessage: async (msg: LiveServerMessage) => {
                         const serverContent = msg.serverContent;
                         
-                        // Handle Turn Complete (Transcription updates)
-                        if (serverContent?.turnComplete) {
-                            // No-op for now, we rely on incremental transcription or just audio
-                        }
-
-                        // Handle Transcriptions
-                        if (serverContent?.modelTurn?.parts?.[0]?.text) {
-                            // Text output from model (rare in audio mode unless specified)
-                        }
-
                         // Handle Tool Calls
                         if (msg.toolCall) {
                              for (const fc of msg.toolCall.functionCalls) {
@@ -212,11 +252,11 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                                      }
                                      // Send response back
                                      sessionPromise.then(session => session.sendToolResponse({
-                                         functionResponses: {
+                                         functionResponses: [{
                                              name: fc.name,
                                              id: fc.id,
                                              response: { result: "ok" }
-                                         }
+                                         }]
                                      }));
                                  }
                              }
@@ -261,8 +301,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                     responseModalities: [Modality.AUDIO],
                     systemInstruction: systemInstruction,
                     tools: [{ functionDeclarations: [writeEditorTool] }],
-                    inputAudioTranscription: { model: "google-speech-v2" }, 
-                    outputAudioTranscription: { model: "google-speech-v2" } // Keep simple
+                    inputAudioTranscription: {}, 
+                    outputAudioTranscription: {} 
                 }
             });
 
@@ -284,6 +324,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
         
         if (inputAudioContextRef.current) inputAudioContextRef.current.close();
         if (outputAudioContextRef.current) outputAudioContextRef.current.close();
+        
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
         
         // Stop all playing audio
         sourcesRef.current.forEach(s => s.stop());
@@ -444,6 +486,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                              <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
                                  <Volume2 className="w-8 h-8 animate-pulse" />
                                  <p className="text-sm">Listening...</p>
+                                 <canvas ref={canvasRef} width="200" height="40" className="mt-2 rounded opacity-50"></canvas>
                              </div>
                          )}
                         {messages.map((msg) => (
@@ -510,12 +553,14 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                     <div className="p-3 border-t bg-background shrink-0">
                         {isLive ? (
                             <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-md p-2">
-                                <div className="flex items-center gap-3">
-                                    <div className="relative">
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <div className="relative shrink-0">
                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
                                     </div>
                                     <span className="text-xs font-semibold text-red-500">Voice Mode Active</span>
+                                    {/* Small visualizer in the control bar */}
+                                    <canvas ref={canvasRef} width="60" height="20" className="ml-2 opacity-80" />
                                 </div>
                                 <Button size="sm" variant="destructive" onClick={isLive ? disconnectLive : connectLive} className="h-8">
                                     End Session
