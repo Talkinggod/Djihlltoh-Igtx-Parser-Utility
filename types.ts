@@ -13,6 +13,48 @@ export type LanguageProfile =
 
 export type UILanguage = 'en' | 'zh-CN' | 'zh-TW' | 'ar';
 
+// --- Intelligent Document Type System ---
+
+export type PriorityLevel = 'critical' | 'high' | 'medium' | 'low';
+export type ActionType = 'filing' | 'response' | 'appearance' | 'service' | 'internal';
+
+export interface DocumentTypeAction {
+  id: string;
+  label: string;
+  type: ActionType;
+  priority: PriorityLevel;
+  description?: string;
+}
+
+export interface DocumentTypeDeadline {
+  label: string;
+  trigger: string; // e.g., "Date of Service"
+  duration: string; // e.g., "20 days"
+  isJurisdictional: boolean; // If true, missing this is fatal
+}
+
+export interface DocumentTypeStrategy {
+  scenario: string;
+  recommendation: string;
+}
+
+export interface DocumentTypeDefinition {
+  id: string; // normalized key e.g. "motion_to_dismiss"
+  name: string; // Display name e.g. "Motion to Dismiss"
+  category: 'pleading' | 'motion' | 'discovery' | 'judgment' | 'contract' | 'other';
+  description: string;
+  
+  // The "Knowledge Graph" of this document type
+  actions: DocumentTypeAction[];
+  deadlines: DocumentTypeDeadline[];
+  relatedMotions: string[]; // IDs of other document types
+  strategies: DocumentTypeStrategy[];
+  
+  // Validation rules for the parser
+  requiredSections?: string[]; // e.g. ["Wherefore Clause", "Verification"]
+  isUserDefined?: boolean;
+}
+
 // --- Internal Parse Types ---
 
 export interface PdfTextDiagnostics {
@@ -44,6 +86,8 @@ export interface ParserMetadata {
   tier4Assessment?: Tier4Assessment;
   profileUsed: LanguageProfile;
   domain: ParserDomain;
+  // Enhanced Metadata
+  documentType?: string; // The ID of the selected DocumentTypeDefinition
   provenanceHash: string; 
   blockDefinition: string; 
   pdfDiagnostics?: PdfTextDiagnostics;
@@ -73,6 +117,17 @@ export interface SemanticState {
   };
 }
 
+export type DocStatus = 'checked_in' | 'missing' | 'unavailable' | 'unknown';
+export type DocCategory = 'statute' | 'case_law' | 'evidence' | 'contract' | 'affidavit';
+
+export interface FoundationalDocument {
+    name: string;      // e.g. "CPLR 3211", "Lease Agreement", "Exhibit A"
+    category: DocCategory;
+    status: DocStatus;
+    context: string;   // Contextual snippet e.g. "Attached as Exhibit A" or "Plaintiff failed to provide"
+    description?: string;
+}
+
 // Legal State
 export interface LegalState {
   provenance?: {
@@ -87,6 +142,8 @@ export interface LegalState {
     doc_type: string | null;
   };
   legal_points: string[];
+  foundational_docs: FoundationalDocument[];
+  logic_trace?: string[]; // For "If/Then" logic output and warnings
 }
 
 export interface ExtractedBlock {

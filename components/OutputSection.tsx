@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParseReport, ParserDomain } from '../types';
 import { generateExportContent, ExportFormat } from '../services/exportService';
 import { enrichReportWithSemantics } from '../services/aiService';
-import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2 } from 'lucide-react';
+import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
@@ -102,6 +102,10 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
       } finally {
           setIsEnriching(false);
       }
+  };
+
+  const handleCitationLookup = (query: string) => {
+      window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
   };
 
   const isStage2Complete = report?.igtxDocument.blocks.some(b => 
@@ -330,24 +334,94 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
 
                         {/* Legal State Display */}
                         {block.legal_state && domain === 'legal' && (
-                             <div className="mt-3 bg-muted/30 p-2 rounded text-xs font-mono border border-border/50 space-y-2">
-                                {block.legal_state.case_meta.index_number && (
-                                    <div className="flex items-center gap-2 text-emerald-600">
-                                        <FileCheck className="w-3 h-3" />
-                                        <span className="font-semibold">INDEX: {block.legal_state.case_meta.index_number}</span>
+                             <div className="space-y-3 mt-3">
+                                {/* Basic Metadata (Parties, Index) */}
+                                {(block.legal_state.case_meta.index_number || block.legal_state.parties.length > 0) && (
+                                    <div className="bg-muted/30 p-2 rounded text-xs font-mono border border-border/50 space-y-2">
+                                        {block.legal_state.case_meta.index_number && (
+                                            <div className="flex items-center gap-2 text-emerald-600">
+                                                <FileCheck className="w-3 h-3" />
+                                                <span className="font-semibold">INDEX: {block.legal_state.case_meta.index_number}</span>
+                                            </div>
+                                        )}
+                                        {block.legal_state.parties.length > 0 && (
+                                            <div className="flex flex-wrap gap-1">
+                                                {block.legal_state.parties.map((p, i) => (
+                                                    <Badge key={i} variant="outline" className="text-[9px] bg-background border-primary/20">
+                                                        {p.role.toUpperCase()}: {p.name}
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
-                                {block.legal_state.parties.length > 0 && (
-                                    <div className="flex flex-wrap gap-1">
-                                        {block.legal_state.parties.map((p, i) => (
-                                            <Badge key={i} variant="outline" className="text-[9px] bg-background border-primary/20">
-                                                {p.role.toUpperCase()}: {p.name}
-                                            </Badge>
-                                        ))}
+
+                                {/* Foundational Documents Tracking */}
+                                {block.legal_state.foundational_docs && block.legal_state.foundational_docs.length > 0 && (
+                                    <div className="grid gap-2">
+                                        {block.legal_state.foundational_docs.map((doc, idx) => {
+                                            const isMissing = doc.status === 'missing' || doc.status === 'unavailable';
+                                            const isCheckedIn = doc.status === 'checked_in';
+                                            return (
+                                                <div 
+                                                    key={idx} 
+                                                    className={cn(
+                                                        "p-3 rounded-md border flex flex-col gap-2 transition-colors",
+                                                        isMissing 
+                                                            ? "bg-amber-500/10 border-amber-500/50" 
+                                                            : "bg-emerald-500/5 border-emerald-500/20"
+                                                    )}
+                                                >
+                                                    <div className="flex justify-between items-start">
+                                                        <div className="flex items-center gap-2">
+                                                            {isMissing 
+                                                                ? <FileWarning className="w-4 h-4 text-amber-500" /> 
+                                                                : (doc.category === 'statute' || doc.category === 'case_law' ? <Scale className="w-4 h-4 text-emerald-600" /> : <FileCheck className="w-4 h-4 text-emerald-600" />)
+                                                            }
+                                                            <span className={cn("text-xs font-bold", isMissing ? "text-amber-600" : "text-emerald-700")}>
+                                                                {doc.name}
+                                                            </span>
+                                                        </div>
+                                                        <Badge variant="outline" className={cn("text-[9px] uppercase", 
+                                                            isMissing ? "border-amber-500/40 text-amber-600" : "border-emerald-500/40 text-emerald-600"
+                                                        )}>
+                                                            {doc.status.replace('_', ' ')}
+                                                        </Badge>
+                                                    </div>
+                                                    
+                                                    <div className="text-[10px] text-muted-foreground flex justify-between items-end">
+                                                        <span>{doc.context}</span>
+                                                        
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="ghost" 
+                                                            className="h-6 gap-1 text-[9px] px-2 hover:bg-background/50"
+                                                            onClick={() => handleCitationLookup(doc.name)}
+                                                        >
+                                                            <Search className="w-3 h-3" />
+                                                            Lookup
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
+                                
+                                {/* Logic Trace / Warnings */}
+                                {block.legal_state.logic_trace && block.legal_state.logic_trace.length > 0 && (
+                                    <div className="bg-red-500/5 border border-red-500/20 p-2 rounded text-xs text-red-600/80 flex gap-2 items-start">
+                                        <ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                                        <ul className="list-disc pl-3">
+                                            {block.legal_state.logic_trace.map((trace, ti) => (
+                                                <li key={ti}>{trace}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
                                 {block.legal_state.legal_points.length > 0 && (
-                                    <ul className="list-disc pl-4 text-muted-foreground">
+                                    <ul className="list-disc pl-4 text-xs text-muted-foreground">
                                         {block.legal_state.legal_points.map((pt, i) => <li key={i}>{pt}</li>)}
                                     </ul>
                                 )}

@@ -1,4 +1,5 @@
 
+
 import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain } from '../types';
 
 const IGTX_VERSION = "2.0.0-dual";
@@ -246,7 +247,8 @@ export function parseIGT(
       legal_state: domain === 'legal' ? {
           parties: [],
           case_meta: { index_number: null, court: null, doc_type: null },
-          legal_points: []
+          legal_points: [],
+          foundational_docs: []
       } : undefined,
       vector_state: { embedding: null, model: null, dimensionality: null },
       integrity: { hash: b.id, warnings: b.warnings }

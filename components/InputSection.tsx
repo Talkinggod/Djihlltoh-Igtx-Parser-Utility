@@ -11,6 +11,7 @@ import { scrapeUrlViaGemini } from '../services/webScraper';
 import { PdfViewer } from './PdfViewer';
 import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain } from '../types';
 import { translations } from '../services/translations';
+import { DocumentTypeSelector } from './DocumentTypeSelector';
 
 interface InputSectionProps {
   input: string;
@@ -42,6 +43,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
   // URL Input State
   const [urlInput, setUrlInput] = useState("");
   const [isScraping, setIsScraping] = useState(false);
+
+  // Document Type State (Legal Mode)
+  const [docTypeId, setDocTypeId] = useState<string>("");
 
   const t = translations[lang];
 
@@ -165,13 +169,23 @@ export const InputSection: React.FC<InputSectionProps> = ({
     setPdfFile(null);
     setPdfDiagnostics(undefined);
     setUrlInput("");
+    setDocTypeId("");
     setSourceMeta({ title: "", author: "", year: null, language: "", source_type: "legacy_text" });
     setActiveTab("input");
   };
 
+  const handleProcessWrapper = () => {
+      onProcess({
+          ...sourceMeta,
+          // Inject the Document Type ID into metadata so AI Service can use it
+          // @ts-ignore
+          documentType: docTypeId
+      }, pdfDiagnostics);
+  };
+
   return (
     <Card className="flex flex-col h-full border-border shadow-md overflow-hidden relative">
-      <CardHeader className="pb-3 border-b bg-muted/20">
+      <CardHeader className="pb-3 border-b bg-muted/20 shrink-0">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -191,14 +205,14 @@ export const InputSection: React.FC<InputSectionProps> = ({
       </CardHeader>
 
       <div 
-        className="flex-1 flex flex-col min-h-0 bg-background relative"
+        className="flex-1 flex flex-col min-h-0 bg-background relative overflow-hidden"
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
       >
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-           <div className="border-b px-4 py-2 bg-muted/10 flex justify-between items-center gap-2 flex-wrap sm:flex-nowrap">
+           <div className="border-b px-4 py-2 bg-muted/10 flex justify-between items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
              <TabsList className="bg-muted/50 h-9 shrink-0">
                <TabsTrigger value="input" className="text-xs gap-2">
                  <Edit3 className="w-3.5 h-3.5" /> {t.tab_input}
@@ -211,34 +225,32 @@ export const InputSection: React.FC<InputSectionProps> = ({
                </TabsTrigger>
              </TabsList>
              
-             {/* Profile Selector */}
-             <div className="flex items-center gap-2 max-w-full overflow-hidden">
-                <Settings2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <select 
-                    className="h-8 text-xs bg-background border border-input rounded-md px-2 py-0 focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px] sm:max-w-[200px]"
-                    value={profile}
-                    onChange={(e) => setProfile(e.target.value as LanguageProfile)}
-                >
-                    {domain === 'linguistic' ? (
-                        <>
-                            <option value="generic">Generic (General-Purpose)</option>
-                            <option value="polysynthetic">Polysynthetic (Complex)</option>
-                            <option value="analytic">Analytic / Isolating</option>
-                            <option value="morphological_dense">Morphologically Dense</option>
-                        </>
-                    ) : (
-                        <>
-                            <option value="legal_pleading">Court Pleading / Motion</option>
-                            <option value="legal_contract">Contract / Agreement</option>
-                            <option value="legal_statute">Statute / Regulation</option>
-                        </>
-                    )}
-                </select>
-             </div>
+             {/* Profile/DocType Selector */}
+             {domain === 'linguistic' ? (
+                <div className="flex items-center gap-2 max-w-full overflow-hidden">
+                    <Settings2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <select 
+                        className="h-8 text-xs bg-background border border-input rounded-md px-2 py-0 focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px] sm:max-w-[200px]"
+                        value={profile}
+                        onChange={(e) => setProfile(e.target.value as LanguageProfile)}
+                    >
+                        <option value="generic">Generic (General-Purpose)</option>
+                        <option value="polysynthetic">Polysynthetic (Complex)</option>
+                        <option value="analytic">Analytic / Isolating</option>
+                        <option value="morphological_dense">Morphologically Dense</option>
+                    </select>
+                </div>
+             ) : (
+                 <div className="flex items-center gap-2">
+                     {/* Legal mode uses the large selector in sidebar or metadata panel, 
+                         but for top bar we keep it clean or show a badge */}
+                     <Badge variant="secondary" className="text-[10px]">Legal Mode</Badge>
+                 </div>
+             )}
            </div>
             
            {/* Profile Disclaimer */}
-           <div className="bg-primary/5 px-4 py-1.5 border-b border-primary/10 flex items-center gap-2">
+           <div className="bg-primary/5 px-4 py-1.5 border-b border-primary/10 flex items-center gap-2 shrink-0">
                 <Info className="w-3 h-3 text-primary/70 shrink-0" />
                 <span className="text-[10px] text-primary/80 font-medium">
                     {domain === 'legal' 
@@ -246,39 +258,53 @@ export const InputSection: React.FC<InputSectionProps> = ({
                         : t.profile_disclaimer}
                 </span>
            </div>
+           
+           {/* Legal Doc Type Selector Panel */}
+           {domain === 'legal' && activeTab === 'input' && (
+                <div className="bg-muted/5 border-b border-border px-4 py-3 shrink-0">
+                    <DocumentTypeSelector 
+                        value={docTypeId}
+                        onChange={setDocTypeId}
+                        inputPreview={input}
+                        apiKey={apiKey}
+                    />
+                </div>
+           )}
 
            {/* Metadata Injector Panel */}
-           <div className="bg-muted/5 border-b border-border px-4 py-2">
-              <div 
-                className="flex items-center justify-between cursor-pointer group"
-                onClick={() => setShowMetadata(!showMetadata)}
-              >
-                  <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground group-hover:text-primary transition-colors">
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>{domain === 'legal' ? "Docket Metadata" : t.metadata_label}</span>
+           {domain !== 'legal' && (
+               <div className="bg-muted/5 border-b border-border px-4 py-2 shrink-0">
+                  <div 
+                    className="flex items-center justify-between cursor-pointer group"
+                    onClick={() => setShowMetadata(!showMetadata)}
+                  >
+                      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground group-hover:text-primary transition-colors">
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>{t.metadata_label}</span>
+                      </div>
+                      {showMetadata ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
                   </div>
-                  {showMetadata ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
-              </div>
-              
-              {showMetadata && (
-                  <div className="mt-3 grid grid-cols-2 gap-3 pb-2 animate-in slide-in-from-top-2 duration-200">
-                      <input 
-                        type="text" 
-                        placeholder={domain === 'legal' ? "Case Name / Title" : t.ph_title}
-                        className="col-span-2 h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        value={sourceMeta.title || ""}
-                        onChange={(e) => setSourceMeta({...sourceMeta, title: e.target.value})}
-                      />
-                      <input 
-                        type="text" 
-                        placeholder={domain === 'legal' ? "Judge / Attorney" : t.ph_author}
-                        className="h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        value={sourceMeta.author || ""}
-                        onChange={(e) => setSourceMeta({...sourceMeta, author: e.target.value})}
-                      />
-                  </div>
-              )}
-           </div>
+                  
+                  {showMetadata && (
+                      <div className="mt-3 grid grid-cols-2 gap-3 pb-2 animate-in slide-in-from-top-2 duration-200">
+                          <input 
+                            type="text" 
+                            placeholder={t.ph_title}
+                            className="col-span-2 h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            value={sourceMeta.title || ""}
+                            onChange={(e) => setSourceMeta({...sourceMeta, title: e.target.value})}
+                          />
+                          <input 
+                            type="text" 
+                            placeholder={t.ph_author}
+                            className="h-8 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            value={sourceMeta.author || ""}
+                            onChange={(e) => setSourceMeta({...sourceMeta, author: e.target.value})}
+                          />
+                      </div>
+                  )}
+               </div>
+           )}
 
            <div className="flex-1 relative min-h-0">
              <TabsContent value="input" className="absolute inset-0 m-0">
@@ -389,7 +415,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
         </div>
 
         <Button 
-          onClick={() => onProcess(sourceMeta, pdfDiagnostics)}
+          onClick={handleProcessWrapper}
           disabled={!input.trim() || isLoadingFile || isScraping}
           className="shadow-lg shadow-primary/20"
         >

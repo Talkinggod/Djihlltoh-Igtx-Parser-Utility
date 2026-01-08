@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { ParseReport, ParserDomain } from "../types";
+import { DocumentTypeService } from "./documentTypeService";
 
 const BATCH_SIZE = 5;
 
@@ -18,6 +19,11 @@ export async function enrichReportWithSemantics(
     }
 
     const domain = report.metadata.domain;
+    const docTypeId = report.metadata.documentType;
+    
+    // Retrieve the Document Type Definition to contextualize the prompt
+    const docTypeDef = docTypeId ? DocumentTypeService.getById(docTypeId) : undefined;
+
     const totalBlocks = report.blocks.length;
     let processed = 0;
     
@@ -29,7 +35,7 @@ export async function enrichReportWithSemantics(
         const currentBatch = enrichedBlocks.slice(i, batchEnd);
         
         try {
-            const enrichedBatch = await processBatch(currentBatch, apiKey, domain);
+            const enrichedBatch = await processBatch(currentBatch, apiKey, domain, docTypeDef);
             
             for (let j = 0; j < enrichedBatch.length; j++) {
                 const globalIndex = i + j;
@@ -75,16 +81,33 @@ export async function enrichReportWithSemantics(
     };
 }
 
-async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain): Promise<any[]> {
+async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain, docTypeDef?: any): Promise<any[]> {
     const ai = new GoogleGenAI({ apiKey });
 
     const promptContext = blocks.map((b, idx) => 
         `Block ID: ${b.id}\nPosition: ${b.lineNumber}\nText: "${b.extractedLanguageLine}"`
     ).join("\n\n---\n\n");
 
-    const systemInstruction = domain === 'legal'
-       ? `You are an expert Legal Assistant specializing in analyzing court pleadings. Extract key legal entities.`
-       : `You are a specialized linguistic analyzer for Interlinear Glossed Text (IGT). Identify predicates and arguments.`;
+    let systemInstruction = "";
+
+    if (domain === 'legal') {
+        const docTypeName = docTypeDef ? docTypeDef.name : "Court Document";
+        const requiredSections = docTypeDef?.requiredSections ? `Look for sections: ${docTypeDef.requiredSections.join(', ')}.` : "";
+        
+        systemInstruction = `You are an expert Legal Assistant specializing in analyzing a **${docTypeName}**.
+       
+       ${docTypeDef?.description || ""}
+
+       Task:
+       1. Extract key entities (Parties, Court info).
+       2. Identify **Foundational Documents** (Contracts, Leases, Affidavits, Exhibits) and **Legal Authorities** (CPLR, RPL, Statutes, Case Law).
+       3. **Status Tracking**: Determine if a document is 'checked_in' (attached, exhibited, available) or 'missing' (referenced as not provided, unavailable, or failed to include).
+       4. **Logic**: If a foundational document is critical (e.g., the Lease in a non-payment case) and is missing, flag it in the 'status' as 'missing' and add a note in 'logic_trace'.
+       5. **Validation**: ${requiredSections}
+       6. Default statutes to 'checked_in'.`;
+    } else {
+        systemInstruction = `You are a specialized linguistic analyzer for Interlinear Glossed Text (IGT). Identify predicates and arguments.`;
+    }
 
     const linguisticSchema = {
         type: Type.OBJECT,
@@ -137,7 +160,21 @@ async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain)
                                 doc_type: { type: Type.STRING, nullable: true }
                             }
                         },
-                        legal_points: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key legal arguments or principles in this block" }
+                        foundational_docs: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING, description: "Name of document or statute e.g. 'Exhibit A', 'CPLR 3211'" },
+                                    category: { type: Type.STRING, enum: ['statute', 'case_law', 'evidence', 'contract', 'affidavit'] },
+                                    status: { type: Type.STRING, enum: ['checked_in', 'missing', 'unavailable', 'unknown'], description: "Infer based on context. 'checked_in' if attached." },
+                                    context: { type: Type.STRING, description: "Brief snippet justifying status" },
+                                    description: { type: Type.STRING, nullable: true }
+                                }
+                            }
+                        },
+                        legal_points: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key legal arguments or principles in this block" },
+                        logic_trace: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Logic warnings or inconsistencies found (e.g. 'Defendant implies lease is missing')" }
                     }
                 }
             }
@@ -182,6 +219,8 @@ async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain)
                     parties: result.parties || [],
                     case_meta: result.case_meta || { index_number: null, court: null, doc_type: null },
                     legal_points: result.legal_points || [],
+                    foundational_docs: result.foundational_docs || [],
+                    logic_trace: result.logic_trace || [],
                     provenance: { source: 'ai', model: modelVersion, generated_at: timestamp }
                 }
             };
