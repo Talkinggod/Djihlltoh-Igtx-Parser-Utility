@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { CaseSidebar } from './components/CaseSidebar';
@@ -163,34 +164,45 @@ function App() {
 
       const dirHandle = await FileSystemService.selectDirectory();
       if (dirHandle) {
-          // 1. Set Handle
-          updateActiveCase({ 
-              directoryHandle: dirHandle,
-              localSyncEnabled: true
-          });
-          
           setImportStatus("Scanning folder for files...");
 
-          // 2. Scan and Import Files Recursively
           try {
+             // 1. Scan and Import Files from the selected directory
+             // We pass current docs to check for duplicates inside the service
              const importedDocs = await FileSystemService.importFilesFromDirectory(
                  dirHandle, 
                  activeCase.documents,
                  (status) => setImportStatus(status)
              );
              
+             // 2. Prepare merged state
+             // Combine existing docs with newly imported ones
+             const mergedDocuments = [...activeCase.documents, ...importedDocs];
+             
+             // 3. Update State (This sets the handle and enables sync)
+             // We pass documents here so they are set in the state before the first auto-sync fires
+             updateActiveCase({ 
+                 directoryHandle: dirHandle,
+                 localSyncEnabled: true,
+                 documents: mergedDocuments
+             });
+
+             // 4. Perform initial write-back sync explicitly
+             // We do this to ensure metadata and existing notes/docs are written to the new folder immediately.
+             // We construct a temp object because the state update (step 3) is asynchronous.
+             const tempCase = { 
+                 ...activeCase, 
+                 directoryHandle: dirHandle, 
+                 localSyncEnabled: true,
+                 documents: mergedDocuments 
+             };
+             await FileSystemService.syncCaseToLocal(tempCase, dirHandle);
+
              if (importedDocs.length > 0) {
-                 updateActiveCase({
-                     documents: [...activeCase.documents, ...importedDocs]
-                 });
                  alert(`Successfully connected to "${dirHandle.name}". Imported ${importedDocs.length} new files.`);
              } else {
-                 alert(`Connected to "${dirHandle.name}". No new compatible files found.`);
+                 alert(`Connected to "${dirHandle.name}". No new compatible files found to import.`);
              }
-
-             // 3. Perform initial write-back sync
-             const tempCase = { ...activeCase, directoryHandle: dirHandle, localSyncEnabled: true };
-             await FileSystemService.syncCaseToLocal(tempCase, dirHandle);
 
           } catch(e) {
              console.error(e);
@@ -440,6 +452,7 @@ function App() {
             folderName: activeCase.directoryHandle?.name,
             fileCount: activeCase.documents.length + activeCase.notes.length
         } : undefined}
+        lang={lang}
       />
     </div>
   );

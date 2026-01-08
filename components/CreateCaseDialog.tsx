@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { Dialog, X, Upload, FileText, Gavel, Check, Loader2 } from 'lucide-react';
+import { X, Upload, FileText, Gavel, Check, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { extractTextFromPdf } from '../services/pdfExtractor';

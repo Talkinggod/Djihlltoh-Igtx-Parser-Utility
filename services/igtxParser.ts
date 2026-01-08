@@ -1,5 +1,5 @@
 
-
+import { franc } from 'franc';
 import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain, CaseMetadata, CaseType } from '../types';
 
 const IGTX_VERSION = "2.0.0-dual";
@@ -372,7 +372,29 @@ export function parseIGT(
 ): ParseReport {
   const normalizedText = rawText.normalize('NFC');
   
-  let detectedLang = sourceMetadata.language || 'und';
+  let detectedLang = sourceMetadata.language || '';
+
+  // 1. Language Detection (if not provided)
+  if (!detectedLang && normalizedText.length > 20) {
+      try {
+          // franc returns ISO 639-3 code (e.g. 'eng', 'rus', 'zho')
+          const guess = franc(normalizedText);
+          if (guess && guess !== 'und') {
+              detectedLang = guess;
+          }
+      } catch (e) {
+          console.warn("Language detection failed", e);
+      }
+  }
+
+  // Fallback
+  if (!detectedLang) detectedLang = 'und';
+
+  // 2. Profile Inference (if generic)
+  if (profile === 'generic' && LANG_PROFILE_MAP[detectedLang]) {
+      profile = LANG_PROFILE_MAP[detectedLang];
+  }
+  
   const tier4Assessment = tier4Check(normalizedText, domain, detectedLang, pdfDiagnostics);
   const rawLines = normalizedText.split(/\r?\n/);
   

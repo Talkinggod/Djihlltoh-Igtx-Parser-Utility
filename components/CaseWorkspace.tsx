@@ -94,7 +94,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     return (
         <div className="flex flex-col h-full bg-background">
             {/* Case Workspace Navigation */}
-            <div className="border-b bg-background px-4 py-2 flex items-center gap-4 shrink-0 overflow-x-auto">
+            <div className="border-b bg-background px-4 py-2 flex items-center gap-4 shrink-0 overflow-x-auto custom-scrollbar">
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <TabsList className="bg-muted/40 h-10 w-full justify-start gap-4 px-2">
                         <TabsTrigger value="analysis" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
@@ -168,7 +168,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
 
                 {/* 2. DOCUMENTS TAB */}
                 {activeTab === 'documents' && (
-                    <div className="h-full p-4 md:p-6 animate-in fade-in slide-in-from-bottom-2 duration-300 overflow-y-auto">
+                    <div className="h-full p-4 md:p-6 animate-in fade-in slide-in-from-bottom-2 duration-300 overflow-y-auto custom-scrollbar">
                         <div className="max-w-5xl mx-auto h-full flex flex-col gap-4">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                                 <div className="flex items-center gap-2 bg-muted/30 p-1 rounded-lg">
@@ -258,7 +258,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                     <Plus className="w-3.5 h-3.5 mr-2" /> Add Current Note
                                 </Button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                                 {caseData.notes.map(note => (
                                     <div key={note.id} className="p-3 rounded bg-card border hover:border-primary/50 cursor-pointer group">
                                         <div className="flex justify-between items-start mb-1">
@@ -284,7 +284,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                 Quick Note Editor
                              </h2>
                              <textarea 
-                                className="flex-1 resize-none bg-muted/20 border-none rounded-lg p-4 focus:ring-1 ring-primary outline-none"
+                                className="flex-1 resize-none bg-muted/20 border-none rounded-lg p-4 focus:ring-1 ring-primary outline-none custom-scrollbar"
                                 placeholder="Type a note here and click 'Add'..."
                                 value={newNote}
                                 onChange={(e) => setNewNote(e.target.value)}

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2 } from 'lucide-react';
 import { Button } from './ui/button';
@@ -5,8 +6,9 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { sendChatMessage, writeEditorTool } from '../services/aiService';
-import { ParserDomain, LanguageProfile, CaseEvent } from '../types';
+import { ParserDomain, LanguageProfile, CaseEvent, UILanguage } from '../types';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { translations } from '../services/translations';
 
 interface ChatBotProps {
     apiKey: string;
@@ -27,6 +29,7 @@ interface ChatBotProps {
         folderName: string;
         fileCount: number;
     };
+    lang: UILanguage;
 }
 
 interface Message {
@@ -37,15 +40,25 @@ interface Message {
     action?: string;
 }
 
-export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, context, onUpdateEditor, caseContext, localSyncInfo }) => {
+const languageMap: Record<string, string> = {
+    'en': 'English',
+    'zh-CN': 'Simplified Chinese (Mandarin)',
+    'zh-TW': 'Traditional Chinese (Mandarin)',
+    'ar': 'Arabic'
+};
+
+export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, context, onUpdateEditor, caseContext, localSyncInfo, lang }) => {
     const [isOpen, setIsOpen] = useState(false);
+    
+    // Dynamic Welcome Message based on Language
+    const t = translations[lang];
+    const initialWelcome = domain === 'legal' ? t.chatbot_welcome_legal : t.chatbot_welcome_linguistic;
+
     const [messages, setMessages] = useState<Message[]>([
         {
             id: 'init-1',
             role: 'model',
-            text: domain === 'legal' 
-                ? "Hello. I am the Legal Studio Assistant. How can I help you with procedural rules or document formatting today?"
-                : "Greetings. I am your Linguistic Parsing Assistant. Ask me about glossing standards or morphology.",
+            text: initialWelcome,
             timestamp: new Date()
         }
     ]);
@@ -75,17 +88,16 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
         }
     }, [messages, isOpen]);
 
-    // Reset welcome message on domain switch
+    // Reset welcome message on domain or lang switch
     useEffect(() => {
+        const newWelcome = domain === 'legal' ? translations[lang].chatbot_welcome_legal : translations[lang].chatbot_welcome_linguistic;
         setMessages([{
-            id: `init-${domain}`,
+            id: `init-${domain}-${lang}`,
             role: 'model',
-            text: domain === 'legal' 
-                ? "Hello. I am the Legal Studio Assistant. How can I help you with procedural rules or document formatting today?"
-                : "Greetings. I am your Linguistic Parsing Assistant. Ask me about glossing standards or morphology.",
+            text: newWelcome,
             timestamp: new Date()
         }]);
-    }, [domain]);
+    }, [domain, lang]);
 
     // --- AUDIO UTILS ---
     function b64ToUint8Array(base64: string) {
@@ -203,10 +215,14 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
             setTimeout(drawVisualizer, 100);
 
             // Prepare System Instruction
+            const targetLangName = languageMap[lang] || 'English';
+
             let systemInstruction = domain === 'legal'
                 ? "You are the Voice Assistant for Dziłtǫ́ǫ́ Legal Studio. Be concise, professional, and helpful with legal drafting and procedure. You can draft documents."
                 : "You are the Voice Assistant for Dziłtǫ́ǫ́ IGT Parser. Help with linguistics.";
             
+            systemInstruction += ` Speak primarily in ${targetLangName}.`;
+
             if (context) systemInstruction += `\nContext: ${context.slice(0, 1000)}...`;
 
             // Connect
@@ -380,12 +396,15 @@ export const ChatBot: React.FC<ChatBotProps> = ({ apiKey, domain, profile, conte
                 richContext += `\n\n[LOCAL FILE SYSTEM]\nStatus: Connected\nFolder: ${localSyncInfo.folderName}\nFiles: ${localSyncInfo.fileCount} items synced.\nYou can tell the user that their work is being saved to this folder automatically.`;
             }
 
+            const targetLangName = languageMap[lang] || 'English';
+
             const response = await sendChatMessage(
                 historyPayload, 
                 userMsg.text, 
                 apiKey, 
                 domain, 
                 profile,
+                targetLangName,
                 richContext
             );
 

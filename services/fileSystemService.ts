@@ -1,3 +1,4 @@
+
 import { CaseState, StoredDocument, Note } from '../types';
 import { extractTextFromPdf } from './pdfExtractor';
 
@@ -136,7 +137,7 @@ export const FileSystemService = {
                 // Skip system files or metadata
                 if (fileHandle.name.startsWith('.') || fileHandle.name === 'case_metadata.json') return;
                 
-                // Check if already exists
+                // Check if already exists in either the existing case or the new import list
                 if (existingDocs.some(d => d.name === fileHandle.name) || newDocs.some(d => d.name === fileHandle.name)) {
                     return;
                 }
@@ -162,7 +163,7 @@ export const FileSystemService = {
                             const res = await extractTextFromPdf(file);
                             content = res.text;
                         } catch (e) {
-                            content = `[Error extracting PDF: ${e}]`;
+                            content = `[Error extracting PDF: ${e instanceof Error ? e.message : String(e)}]`;
                         }
                     } else if (type.includes('image')) {
                          content = `[Image File: ${file.name}] (OCR not yet run automatically)`;

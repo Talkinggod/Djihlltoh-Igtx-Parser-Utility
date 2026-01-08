@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParseReport, ParserDomain } from '../types';
 import { generateExportContent, ExportFormat } from '../services/exportService';
@@ -192,7 +191,7 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
             </pre>
           </TabsContent>
 
-          <TabsContent value="json" className="min-h-full mt-0 p-6">
+          <TabsContent value="json" className="min-h-full mt-0 p-6 custom-scrollbar">
             <pre className="font-mono text-xs text-primary/80 whitespace-pre" dir="ltr">
               {jsonContent}
             </pre>
@@ -317,7 +316,7 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                           <Badge variant="outline" className="font-mono text-[10px] text-muted-foreground ltr:ml-2 rtl:mr-2">#{block.id.split('-')[1].substring(0,6)}</Badge>
                        </div>
                        
-                       <div className="text-sm font-medium text-primary mb-2 font-mono break-words bg-primary/5 p-2 rounded overflow-x-auto whitespace-pre" dir="ltr">
+                       <div className="text-sm font-medium text-primary mb-2 font-mono break-words bg-primary/5 p-2 rounded overflow-x-auto whitespace-pre custom-scrollbar" dir="ltr">
                          {block.extractedLanguageLine}
                        </div>
 

@@ -10,7 +10,8 @@ type TranslationKey =
   | 'export_btn' | 'copy_btn' | 'stats_items' | 'stats_conf'
   | 'manual_review' | 'tier4_alert' | 'processing'
   | 'tab_url' | 'btn_fetch' | 'fetch_placeholder' | 'scraping'
-  | 'chars_label';
+  | 'chars_label'
+  | 'chatbot_welcome_legal' | 'chatbot_welcome_linguistic';
 
 export const translations: Record<UILanguage, Record<TranslationKey, string>> = {
   'en': {
@@ -48,7 +49,9 @@ export const translations: Record<UILanguage, Record<TranslationKey, string>> = 
     btn_fetch: 'Fetch Page',
     fetch_placeholder: 'https://www.eddersko.com/aleut/texts/...',
     scraping: 'Scraping content via Gemini...',
-    chars_label: 'chars'
+    chars_label: 'chars',
+    chatbot_welcome_legal: 'Hello. I am the Legal Studio Assistant. How can I help you with procedural rules or document formatting today?',
+    chatbot_welcome_linguistic: 'Greetings. I am your Linguistic Parsing Assistant. Ask me about glossing standards or morphology.'
   },
   'zh-CN': {
     title: 'Dziłtǫ́ǫ́ IGTX 解析工具',
@@ -85,7 +88,9 @@ export const translations: Record<UILanguage, Record<TranslationKey, string>> = 
     btn_fetch: '获取页面',
     fetch_placeholder: 'https://example.com/text...',
     scraping: '正在通过 Gemini 抓取内容...',
-    chars_label: '字符'
+    chars_label: '字符',
+    chatbot_welcome_legal: '你好。我是法律工作室助手。今天我能为您提供哪些程序规则或文件格式方面的帮助？',
+    chatbot_welcome_linguistic: '您好。我是您的语言解析助手。请问有关标注标准或形态学的问题。'
   },
   'zh-TW': {
     title: 'Dziłtǫ́ǫ́ IGTX 解析工具',
@@ -122,7 +127,9 @@ export const translations: Record<UILanguage, Record<TranslationKey, string>> = 
     btn_fetch: '獲取頁面',
     fetch_placeholder: 'https://example.com/text...',
     scraping: '正在通過 Gemini 抓取內容...',
-    chars_label: '字符'
+    chars_label: '字符',
+    chatbot_welcome_legal: '你好。我是法律工作室助手。今天我能為您提供哪些程序規則或文件格式方面的協助？',
+    chatbot_welcome_linguistic: '您好。我是您的語言解析助手。請問有關標註標準或形態學的問題。'
   },
   'ar': {
     title: 'أداة تحليل Dziłtǫ́ǫ́ IGTX',
@@ -159,6 +166,8 @@ export const translations: Record<UILanguage, Record<TranslationKey, string>> = 
     btn_fetch: 'جلب الصفحة',
     fetch_placeholder: 'https://example.com/text...',
     scraping: 'جاري استخراج المحتوى عبر Gemini...',
-    chars_label: 'حروف'
+    chars_label: 'حروف',
+    chatbot_welcome_legal: 'مرحباً. أنا مساعد الاستوديو القانوني. كيف يمكنني مساعدتك في القواعد الإجرائية أو تنسيق المستندات اليوم؟',
+    chatbot_welcome_linguistic: 'تحياتي. أنا مساعد التحليل اللغوي الخاص بك. اسألني عن معايير التفسير أو الصرف.'
   }
 };

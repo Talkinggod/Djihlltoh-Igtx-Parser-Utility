@@ -324,7 +324,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                 <div className="relative w-full h-full group">
                   <textarea
                     className={cn(
-                      "w-full h-full bg-transparent p-6 text-sm font-mono text-foreground resize-none focus:outline-none leading-relaxed placeholder:text-muted-foreground/50 whitespace-pre overflow-auto",
+                      "w-full h-full bg-transparent p-6 text-sm font-mono text-foreground resize-none focus:outline-none leading-relaxed placeholder:text-muted-foreground/50 whitespace-pre overflow-auto custom-scrollbar",
                       (isLoadingFile || isScraping) && "opacity-50"
                     )}
                     placeholder={isLoadingFile ? "Reading file..." : (isScraping ? "Fetching content..." : (domain === 'legal' ? "// Paste Affidavit, Brief, or Complaint here..." : "// Paste your raw IGT text here..."))}

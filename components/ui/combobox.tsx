@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronsUpDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from './button';
@@ -21,11 +22,50 @@ interface ComboboxProps {
 export const Combobox: React.FC<ComboboxProps> = ({ options, value, onChange, onCreate, placeholder = "Select...", className }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+        if (open && containerRef.current) {
+             const rect = containerRef.current.getBoundingClientRect();
+             setCoords({
+                 top: rect.bottom + window.scrollY + 4,
+                 left: rect.left + window.scrollX,
+                 width: rect.width
+             });
+        }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleResize, true);
+    
+    return () => {
+        window.removeEventListener('resize', handleResize);
+        window.removeEventListener('scroll', handleResize, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setCoords({
+            top: rect.bottom + 4,
+            left: rect.left,
+            width: rect.width
+        });
+    }
+  }, [open]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+          containerRef.current && 
+          !containerRef.current.contains(event.target as Node) &&
+          listRef.current &&
+          !listRef.current.contains(event.target as Node)
+      ) {
         setOpen(false);
       }
     };
@@ -66,8 +106,18 @@ export const Combobox: React.FC<ComboboxProps> = ({ options, value, onChange, on
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </Button>
       
-      {open && (
-        <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95">
+      {open && createPortal(
+        <div 
+            ref={listRef}
+            style={{
+                position: 'fixed',
+                top: coords.top,
+                left: coords.left,
+                width: coords.width,
+                zIndex: 9999
+            }}
+            className="rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+        >
            <div className="p-1">
              <input
                className="w-full border-b bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -77,7 +127,7 @@ export const Combobox: React.FC<ComboboxProps> = ({ options, value, onChange, on
                autoFocus
              />
            </div>
-           <div className="p-1">
+           <div className="max-h-60 overflow-y-auto p-1 custom-scrollbar">
              {filteredOptions.length === 0 && !query && (
                <p className="p-2 text-sm text-muted-foreground text-center">Start typing...</p>
              )}
@@ -86,7 +136,7 @@ export const Combobox: React.FC<ComboboxProps> = ({ options, value, onChange, on
                <div
                  key={option.value}
                  className={cn(
-                   "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+                   "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 cursor-pointer",
                    value === option.value && "bg-accent text-accent-foreground"
                  )}
                  onClick={() => handleSelect(option.value)}
@@ -111,7 +161,8 @@ export const Combobox: React.FC<ComboboxProps> = ({ options, value, onChange, on
                 </div>
              )}
            </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

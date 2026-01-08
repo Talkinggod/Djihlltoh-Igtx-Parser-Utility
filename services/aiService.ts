@@ -31,6 +31,7 @@ export async function sendChatMessage(
     apiKey: string,
     domain: ParserDomain,
     currentProfile: string,
+    targetLanguage: string,
     contextData?: string
 ): Promise<{ text: string, toolCall?: { name: string, args: any } }> {
     if (!apiKey) throw new Error("API Key required");
@@ -60,6 +61,9 @@ export async function sendChatMessage(
         
         Tone: Academic, Precise, Analytical.`;
     }
+
+    // Inject Language Constraint
+    systemInstruction += `\n\n[COMMUNICATION PROTOCOL]\nPrimary Language: ${targetLanguage}. You must respond in this language unless the user explicitly requests otherwise.`;
 
     // Inject active document context if available
     if (contextData && contextData.trim().length > 0) {
