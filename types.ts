@@ -20,6 +20,24 @@ export interface GoogleUser {
     accessToken: string;
 }
 
+// --- Custom Parsing Rules ---
+export interface CustomRule {
+    id: string;
+    name: string;
+    pattern: string; // Regex string
+    flags?: string; // e.g. 'i', 'g'
+    color?: string; // For highlighting
+    active: boolean;
+}
+
+export interface CustomExtraction {
+    ruleId: string;
+    ruleName: string;
+    match: string;
+    index: number;
+    context: string;
+}
+
 // --- LegalBench Types ---
 export type LegalBenchTaskType = 
     | 'hearsay' 
@@ -284,6 +302,9 @@ export interface ParseReport {
   };
   // The rigorous schema representation
   igtxDocument: IGTXDocument;
+  // New Feature Data
+  timeline?: ExtractedDate[];
+  customExtractions?: CustomExtraction[];
 }
 
 export enum ViewMode {
@@ -515,6 +536,7 @@ export interface CaseState {
     profile: LanguageProfile;
     docTypeId: string;
     referenceDate: Date; // e.g. Filing Date
+    customRules: CustomRule[]; // NEW: User defined parsing rules
     
     // Metadata
     sourceMeta: Partial<IGTXSource>;

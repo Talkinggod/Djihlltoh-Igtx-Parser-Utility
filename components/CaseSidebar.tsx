@@ -47,7 +47,8 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
             <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                 {sortedCases.map(c => {
                     const isActive = c.id === activeCaseId;
-                    const criticalEvents = c.events.filter(e => e.type === 'error' || e.type === 'deadline').length;
+                    // Count unread critical events (Error or Deadline)
+                    const criticalEvents = c.events.filter(e => !e.read && (e.type === 'error' || e.type === 'deadline')).length;
                     const hasCloud = !!c.googleFolderId;
                     
                     return (
@@ -82,7 +83,7 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                                         <span className="truncate max-w-[80px]">{c.docTypeId ? c.docTypeId.replace(/_/g, ' ') : 'Draft'}</span>
                                         {criticalEvents > 0 && (
-                                            <span className="flex items-center gap-0.5 text-amber-600 font-bold bg-amber-500/10 px-1 rounded">
+                                            <span className="flex items-center gap-0.5 text-amber-600 font-bold bg-amber-500/10 px-1 rounded animate-pulse">
                                                 <AlertCircle className="w-2.5 h-2.5" />
                                                 {criticalEvents}
                                             </span>

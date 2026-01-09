@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment } from '../types';
+import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment, CustomRule, CaseEvent } from '../types';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { InputSection } from './InputSection';
 import { OutputSection } from './OutputSection';
 import { ResourceExplorer, ResourceItem } from './ResourceExplorer';
 import { ViabilityDashboard } from './ViabilityDashboard';
 import { LegalBenchTools } from './LegalBenchTools';
-import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope } from 'lucide-react';
+import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope, Bell, Filter, Check, X, Info, AlertTriangle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
@@ -15,6 +15,7 @@ import { extractTextFromPdf } from '../services/pdfExtractor';
 import { GoogleDriveService } from '../services/googleDriveService';
 import { ResizableSplitView } from './ui/ResizableSplitView';
 import { generateViabilityAssessment } from '../services/aiService';
+import { RuleEditorDialog } from './RuleEditorDialog';
 
 interface CaseWorkspaceProps {
     caseData: CaseState;
@@ -33,7 +34,9 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     const [activeTab, setActiveTab] = useState("analysis");
     const [strategySubTab, setStrategySubTab] = useState<'viability' | 'legalbench'>('viability');
     const [docFilter, setDocFilter] = useState<string>('all');
+    const [exhibitFilter, setExhibitFilter] = useState<ExhibitStatus | 'all'>('all');
     const [isAssessing, setIsAssessing] = useState(false);
+    const [isRuleEditorOpen, setIsRuleEditorOpen] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const templateInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -207,6 +210,31 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         });
     };
 
+    // --- Events Logic ---
+    const handleAddEvent = () => {
+        const newEvent: CaseEvent = {
+            id: Date.now().toString(),
+            type: 'info',
+            title: 'Manual Entry',
+            message: 'User added event.',
+            timestamp: new Date(),
+            read: true
+        };
+        updateCase({ events: [newEvent, ...caseData.events] });
+    };
+
+    const markEventRead = (id: string) => {
+        updateCase({
+            events: caseData.events.map(e => e.id === id ? { ...e, read: true } : e)
+        });
+    };
+
+    const deleteEvent = (id: string) => {
+        updateCase({
+            events: caseData.events.filter(e => e.id !== id)
+        });
+    };
+
     // --- Resource Mappers ---
 
     const documentResources: ResourceItem[] = caseData.documents
@@ -237,6 +265,8 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         onDelete: () => deleteNote(note.id)
     }));
 
+    const filteredExhibits = caseData.exhibits.filter(ex => exhibitFilter === 'all' || ex.status === exhibitFilter);
+
     return (
         <div className="flex flex-col h-full bg-background">
             {/* Case Workspace Navigation */}
@@ -259,6 +289,10 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                         <TabsTrigger value="exhibits" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
                             <Gavel className="w-4 h-4" /> <span className="hidden sm:inline">Exhibits</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.exhibits.length}</Badge>
+                        </TabsTrigger>
+                        <TabsTrigger value="events" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                            <Bell className="w-4 h-4" /> <span className="hidden sm:inline">Events</span>
+                            {caseData.events.some(e => !e.read) && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
                         </TabsTrigger>
                         <TabsTrigger value="notes" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
                             <StickyNote className="w-4 h-4" /> <span className="hidden sm:inline">Notes</span>
@@ -295,6 +329,8 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                             refDate={caseData.referenceDate}
                                             setRefDate={(d) => updateCase({ referenceDate: d })}
                                             googleUser={googleUser}
+                                            customRules={caseData.customRules}
+                                            onOpenRuleEditor={() => setIsRuleEditorOpen(true)}
                                         />
                                     </div>
                                 </div>
@@ -509,7 +545,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                 {/* 6. EXHIBITS TAB (Formal Legal Table) */}
                 {activeTab === 'exhibits' && (
                     <div className="h-full flex flex-col bg-background p-4 animate-in fade-in">
-                        <div className="mb-4 flex justify-between items-center">
+                        <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
                                 <h3 className="text-lg font-bold flex items-center gap-2">
                                     <Gavel className="w-5 h-5 text-primary" /> Exhibit List
@@ -521,68 +557,72 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                             </Button>
                         </div>
 
-                        <div className="border rounded-lg overflow-hidden bg-card">
-                            <table className="w-full text-sm">
-                                <thead className="bg-muted/50 border-b">
-                                    <tr>
-                                        <th className="px-4 py-2 text-left font-medium text-muted-foreground w-32">Designation</th>
-                                        <th className="px-4 py-2 text-left font-medium text-muted-foreground">Description</th>
-                                        <th className="px-4 py-2 text-left font-medium text-muted-foreground w-32">Date Marked</th>
-                                        <th className="px-4 py-2 text-center font-medium text-muted-foreground w-48">Admissibility</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {caseData.exhibits.length === 0 ? (
+                        {/* Status Filter */}
+                        <div className="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
+                            {(['all', 'potential', 'marked', 'offered', 'admitted', 'excluded'] as const).map(status => (
+                                <Badge
+                                    key={status}
+                                    variant={exhibitFilter === status ? 'default' : 'outline'}
+                                    className="cursor-pointer capitalize shrink-0"
+                                    onClick={() => setExhibitFilter(status)}
+                                >
+                                    {status}
+                                </Badge>
+                            ))}
+                        </div>
+
+                        <div className="border rounded-lg overflow-hidden bg-card flex-1 min-h-0 relative flex flex-col">
+                            <div className="overflow-auto custom-scrollbar flex-1">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-muted/50 border-b sticky top-0 z-10">
                                         <tr>
-                                            <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
-                                                No exhibits marked yet. Ask the AI to "Mark [Document] as Exhibit A".
-                                            </td>
+                                            <th className="px-4 py-3 font-medium text-muted-foreground w-32">Designation</th>
+                                            <th className="px-4 py-3 font-medium text-muted-foreground">Description</th>
+                                            <th className="px-4 py-3 font-medium text-muted-foreground w-32">Date Marked</th>
+                                            <th className="px-4 py-3 font-medium text-muted-foreground w-40 text-center">Status</th>
                                         </tr>
-                                    ) : (
-                                        caseData.exhibits.map(ex => (
-                                            <tr key={ex.id} className="border-b last:border-0 hover:bg-muted/20">
-                                                <td className="px-4 py-3 font-mono font-bold text-primary">{ex.designation}</td>
-                                                <td className="px-4 py-3">{ex.description}</td>
-                                                <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(ex.markedDate).toLocaleDateString()}</td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex justify-center gap-1">
-                                                        <Badge 
-                                                            variant="outline" 
-                                                            className={cn(
-                                                                "cursor-pointer hover:bg-primary/10",
-                                                                ex.status === 'marked' && "bg-blue-500/10 text-blue-600 border-blue-500/30"
-                                                            )}
-                                                            onClick={() => updateExhibitStatus(ex.id, 'marked')}
-                                                        >
-                                                            ID
-                                                        </Badge>
-                                                        <Badge 
-                                                            variant="outline" 
-                                                            className={cn(
-                                                                "cursor-pointer hover:bg-primary/10",
-                                                                ex.status === 'offered' && "bg-amber-500/10 text-amber-600 border-amber-500/30"
-                                                            )}
-                                                            onClick={() => updateExhibitStatus(ex.id, 'offered')}
-                                                        >
-                                                            OFF
-                                                        </Badge>
-                                                        <Badge 
-                                                            variant="outline" 
-                                                            className={cn(
-                                                                "cursor-pointer hover:bg-primary/10",
-                                                                ex.status === 'admitted' && "bg-green-500/10 text-green-600 border-green-500/30"
-                                                            )}
-                                                            onClick={() => updateExhibitStatus(ex.id, 'admitted')}
-                                                        >
-                                                            EVID
-                                                        </Badge>
-                                                    </div>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {filteredExhibits.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="px-4 py-12 text-center text-muted-foreground">
+                                                    {caseData.exhibits.length === 0 
+                                                        ? "No exhibits marked yet. Ask the AI to 'Mark [Document] as Exhibit A'."
+                                                        : "No exhibits match this filter."}
                                                 </td>
                                             </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
+                                        ) : (
+                                            filteredExhibits.map(ex => (
+                                                <tr key={ex.id} className="hover:bg-muted/20 group">
+                                                    <td className="px-4 py-3 font-mono font-bold text-primary align-middle">{ex.designation}</td>
+                                                    <td className="px-4 py-3 align-middle">{ex.description}</td>
+                                                    <td className="px-4 py-3 text-muted-foreground text-xs align-middle font-mono">{new Date(ex.markedDate).toLocaleDateString()}</td>
+                                                    <td className="px-4 py-3 align-middle text-center">
+                                                        <select
+                                                            className={cn(
+                                                                "h-7 text-[10px] uppercase font-bold rounded border bg-transparent px-2 py-0 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer w-full text-center appearance-none",
+                                                                ex.status === 'admitted' ? "text-green-600 border-green-500/30 bg-green-500/5" :
+                                                                ex.status === 'excluded' ? "text-red-600 border-red-500/30 bg-red-500/5" :
+                                                                ex.status === 'offered' ? "text-amber-600 border-amber-500/30 bg-amber-500/5" :
+                                                                ex.status === 'marked' ? "text-blue-600 border-blue-500/30 bg-blue-500/5" :
+                                                                "text-muted-foreground border-border bg-muted/10"
+                                                            )}
+                                                            value={ex.status}
+                                                            onChange={(e) => updateExhibitStatus(ex.id, e.target.value as ExhibitStatus)}
+                                                        >
+                                                            <option value="potential">Potential</option>
+                                                            <option value="marked">Marked (ID)</option>
+                                                            <option value="offered">Offered</option>
+                                                            <option value="admitted">Admitted</option>
+                                                            <option value="excluded">Excluded</option>
+                                                        </select>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                         <div className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
                             <AlertCircle className="w-3 h-3" />
@@ -591,7 +631,81 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                     </div>
                 )}
 
+                {/* 7. EVENTS / LOG TAB */}
+                {activeTab === 'events' && (
+                    <div className="h-full flex flex-col bg-background p-4 animate-in fade-in">
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 className="text-lg font-bold flex items-center gap-2">
+                                    <Clock className="w-5 h-5 text-primary" /> Case Log
+                                </h3>
+                                <p className="text-xs text-muted-foreground">Timeline of system events, errors, and deadlines.</p>
+                            </div>
+                            <Button size="sm" variant="outline" onClick={handleAddEvent}>
+                                <Plus className="w-4 h-4 mr-2" /> Add Entry
+                            </Button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar border rounded-lg bg-card relative">
+                            {caseData.events.length === 0 && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground">
+                                    <Info className="w-10 h-10 mb-2 opacity-20" />
+                                    <p>No events logged.</p>
+                                </div>
+                            )}
+                            <div className="divide-y">
+                                {caseData.events.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(ev => (
+                                    <div key={ev.id} className={cn("p-4 flex gap-3 group transition-colors", !ev.read ? "bg-primary/5" : "hover:bg-muted/10")}>
+                                        <div className={cn(
+                                            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 border",
+                                            ev.type === 'error' ? "bg-red-500/10 text-red-600 border-red-200" :
+                                            ev.type === 'warning' ? "bg-amber-500/10 text-amber-600 border-amber-200" :
+                                            ev.type === 'success' ? "bg-green-500/10 text-green-600 border-green-200" :
+                                            ev.type === 'deadline' ? "bg-purple-500/10 text-purple-600 border-purple-200" :
+                                            "bg-blue-500/10 text-blue-600 border-blue-200"
+                                        )}>
+                                            {ev.type === 'error' ? <AlertTriangle className="w-4 h-4" /> :
+                                             ev.type === 'warning' ? <AlertCircle className="w-4 h-4" /> :
+                                             ev.type === 'success' ? <Check className="w-4 h-4" /> :
+                                             ev.type === 'deadline' ? <Clock className="w-4 h-4" /> :
+                                             <Info className="w-4 h-4" />}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between items-start">
+                                                <h4 className={cn("text-sm font-semibold", !ev.read && "text-primary")}>{ev.title}</h4>
+                                                <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
+                                                    {new Date(ev.timestamp).toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-foreground/80 mt-1 leading-relaxed">{ev.message}</p>
+                                        </div>
+                                        <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {!ev.read && (
+                                                <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => markEventRead(ev.id)} title="Mark Read">
+                                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                            )}
+                                            <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteEvent(ev.id)} title="Delete">
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
             </div>
+            
+            {/* Rule Editor Modal */}
+            <RuleEditorDialog 
+                isOpen={isRuleEditorOpen}
+                onClose={() => setIsRuleEditorOpen(false)}
+                rules={caseData.customRules || []}
+                onSaveRules={(rules) => updateCase({ customRules: rules })}
+                testContent={caseData.input}
+            />
         </div>
     );
 };

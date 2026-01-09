@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { LegalBenchTaskType, LegalBenchResult, StoredDocument, LegalAnalysisResult } from '../types';
 import { runLegalBenchTask } from '../services/aiService';

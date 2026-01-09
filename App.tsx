@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { CaseSidebar } from './components/CaseSidebar';
@@ -73,7 +72,8 @@ function App() {
                       lastActive: new Date(c.lastActive),
                       events: c.events.map((e: any) => ({ ...e, timestamp: new Date(e.timestamp) })),
                       directoryHandle: undefined, // Cannot persist handles
-                      localSyncEnabled: false     // Reset sync status on reload
+                      localSyncEnabled: false,     // Reset sync status on reload
+                      customRules: c.customRules || [] // Ensure backward compatibility
                   }));
               } catch(e) { console.error("Failed to load cases", e); }
           }
@@ -90,6 +90,7 @@ function App() {
           profile: 'legal_pleading',
           docTypeId: '',
           referenceDate: new Date(),
+          customRules: [],
           sourceMeta: { title: '', author: '', year: null, language: '', source_type: 'legacy_text' },
           events: [],
           lastActive: new Date(),
@@ -132,6 +133,7 @@ function App() {
           profile: 'legal_pleading',
           docTypeId: '', // Could infer
           referenceDate: new Date(),
+          customRules: [],
           sourceMeta: { title: initialDoc?.name || name, author: '', year: null, language: '', source_type: 'legacy_text' },
           events: [],
           lastActive: new Date(),

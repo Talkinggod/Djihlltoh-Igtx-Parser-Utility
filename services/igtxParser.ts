@@ -1,8 +1,9 @@
 
 import { franc } from 'franc';
-import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain, CaseMetadata, CaseType } from '../types';
+import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain, CaseMetadata, CaseType, CustomRule, CustomExtraction } from '../types';
+import { LegalAnalyzer } from './legalAnalyzer';
 
-const IGTX_VERSION = "2.1.0-polyglot";
+const IGTX_VERSION = "2.2.0-hybrid";
 
 const COMMON_TRANSLATION_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
@@ -88,13 +89,11 @@ function analyzeStructure(text: string, domain: ParserDomain = 'linguistic'): St
     const embeddingMarkers = (cleanText.match(/[\(\[\{]/g) || []).length;
     
     // Conjunctions & Relative Pronouns (English/Generic bias for "Language Agnostic" default)
-    // Ideally these would be loaded from a language profile, but these cover high-frequency patterns.
     const coordConjRegex = /\b(and|but|or|nor|for|yet|so)\b/i;
     const subordConjRegex = /\b(because|although|if|when|while|unless|since|after|before|until)\b/i;
     const relativePronounRegex = /\b(that|which|who|whom|whose|where)\b/i;
     const conditionalRegex = /^(if|provided that|unless|subject to|notwithstanding)/i;
     
-    // Verb auxiliary hints (rough generic heuristic)
     const auxVerbRegex = /\b(is|are|was|were|have|has|had|do|does|did|will|would|shall|should|can|could|may|might|must)\b/i;
 
     let clauseType: StructuralAnalysis['clauseType'] = 'simple';
@@ -102,33 +101,23 @@ function analyzeStructure(text: string, domain: ParserDomain = 'linguistic'): St
 
     // --- Classification Logic ---
 
-    // 1. Fragment Detection
-    // Very short, no terminal punctuation, no verb-like structure
     if (tokenCount < 4 && !/[.?!]$/.test(cleanText) && !auxVerbRegex.test(cleanText)) {
         clauseType = 'fragment';
         complexity = 0.1;
     }
-    
-    // 2. Complex/Embedded (High Priority)
-    // Parentheses are the strongest signal of embedding in IGT/Academic text
     else if (embeddingMarkers > 0) {
         clauseType = 'complex_embedded';
         complexity = 0.8 + (embeddingMarkers * 0.05);
     }
-    
-    // 3. Chain Clause (Strong Punctuation)
     else if (strongSepCount > 0) {
         if (strongSepCount > 1) {
             clauseType = 'chain_clause';
             complexity = 0.7 + (strongSepCount * 0.1);
         } else {
-            // Check if the separator balances two substantial chunks
-            clauseType = 'compound'; // e.g. "He arrived; then he left."
+            clauseType = 'compound'; 
             complexity = 0.6;
         }
     }
-    
-    // 4. Compound vs Complex (Comma + Conjunction Analysis)
     else {
         const hasCoord = coordConjRegex.test(cleanText);
         const hasSubord = subordConjRegex.test(cleanText);
@@ -138,59 +127,40 @@ function analyzeStructure(text: string, domain: ParserDomain = 'linguistic'): St
 
         if (hasSubord || hasConditional) {
             clauseType = 'complex_embedded';
-            complexity = 0.85; // Boost for conditionals/subordination
+            complexity = 0.85; 
         } else if (hasRelative && commaCount > 0) {
-            // "The man, who was tall, left." -> Embedded
             clauseType = 'complex_embedded';
             complexity = 0.7;
         } else if (hasCoord && commaCount > 0) {
-            // "I went to the store, and I bought milk." -> Compound
-            // Heuristic: Comma followed somewhat closely by coordinating conjunction
             if (/,\s+(\w+\s+){0,3}(and|but|or|nor|for|yet|so)\b/i.test(cleanText)) {
                 clauseType = 'compound';
                 complexity = 0.6;
             } else {
-                // Comma list (Simple structure with enumeration)
                 clauseType = 'simple';
                 complexity = 0.4;
             }
         } else if (commaCount > 2) {
-            // Heavy listing
-            clauseType = 'chain_clause'; // Treat lists as chains for processing purposes
+            clauseType = 'chain_clause';
             complexity = 0.5;
         } else {
-            // Default Simple
             clauseType = 'simple';
-            // Scale complexity by length (longer sentences are inherently more complex)
             complexity = 0.2 + Math.min(0.3, tokenCount * 0.015);
         }
     }
 
-    // --- Domain Specific Overrides ---
     if (domain === 'legal') {
-        // Legal Pleading Structure Detection
-        
-        // "Wherefore" clauses are typically chains of requests
         if (/^WHEREFORE/i.test(cleanText)) {
             clauseType = 'chain_clause';
             complexity = 0.9;
         }
-        
-        // Recitals (Whereas...)
         if (/^WHEREAS/i.test(cleanText)) {
             clauseType = 'complex_embedded';
             complexity = 0.85;
         }
-
-        // Citations usually shouldn't be treated as complex sentences even if they have punctuation
         if (/\d+\s+U\.?S\.?\s+\d+/.test(cleanText) || /v\./.test(cleanText)) {
-            // Adjust complexity down if it's primarily a citation
             complexity = Math.max(0.3, complexity - 0.2);
         }
-
-        // Detect "If/Then" logic implicitly often found in contracts
         if (conditionalRegex.test(cleanText)) {
-             // Force complex detection for legal logic
              clauseType = 'complex_embedded';
              complexity = Math.max(complexity, 0.8);
         }
@@ -204,9 +174,6 @@ function analyzeStructure(text: string, domain: ParserDomain = 'linguistic'): St
     };
 }
 
-/**
- * Heuristic extractor to auto-fill case metadata from a commencing document.
- */
 export function extractCaseInitialMetadata(text: string): CaseMetadata {
     const meta: CaseMetadata = {
         type: 'Civil',
@@ -216,42 +183,34 @@ export function extractCaseInitialMetadata(text: string): CaseMetadata {
         indexNumber: ''
     };
 
-    const headerText = text.slice(0, 3000); // Check first 3k chars for caption
+    const headerText = text.slice(0, 3000); 
 
-    // 1. Jurisdiction / Court
     const courtMatch = headerText.match(LEGAL_CAPTION_REGEX);
     if (courtMatch) {
-        // Find full line
         const lines = headerText.split('\n');
         const courtLine = lines.find(l => l.includes(courtMatch[0])) || courtMatch[0];
         meta.jurisdiction = courtLine.trim();
         
-        // Infer Type
         if (meta.jurisdiction.includes('HOUSING') || meta.jurisdiction.includes('LANDLORD')) meta.type = 'LT';
         else if (meta.jurisdiction.includes('SMALL')) meta.type = 'Small Claims';
         else if (meta.jurisdiction.includes('DISTRICT')) meta.type = 'Federal';
     }
 
-    // 2. Index Number
     const indexMatch = headerText.match(LEGAL_INDEX_REGEX);
     if (indexMatch && indexMatch[3]) {
         meta.indexNumber = indexMatch[3].trim();
     }
 
-    // 3. Parties (Basic Heuristic based on vs/against block)
     const vsMatch = headerText.match(LEGAL_VS_REGEX);
     if (vsMatch) {
         const parts = headerText.split(vsMatch[0]);
         if (parts.length >= 2) {
-            // Plaintiff is usually before VS, Defendant after
-            // Look backwards from VS for names
-            const beforeVs = parts[0].split('\n').slice(-5).join(' '); // Last 5 lines before VS
-            const afterVs = parts[1].split('\n').slice(0, 5).join(' '); // First 5 lines after VS
+            const beforeVs = parts[0].split('\n').slice(-5).join(' ');
+            const afterVs = parts[1].split('\n').slice(0, 5).join(' ');
             
-            // Cleanup common noise
             const cleanName = (s: string) => s.replace(/Plaintiff|Defendant|Petitioner|Respondent/gi, '').replace(/[-\(\)]/g, '').trim();
 
-            meta.plaintiffs = [cleanName(beforeVs.split(',')[0])]; // Take first likely name
+            meta.plaintiffs = [cleanName(beforeVs.split(',')[0])]; 
             meta.defendants = [cleanName(afterVs.split(',')[0])];
         }
     }
@@ -259,10 +218,6 @@ export function extractCaseInitialMetadata(text: string): CaseMetadata {
     return meta;
 }
 
-/**
- * Determine if Tier 4 processing is needed. 
- * Supports both Linguistic density checks and Legal Pleading structure checks.
- */
 function tier4Check(text: string, domain: ParserDomain, languageHint?: string, diagnostics?: PdfTextDiagnostics): Tier4Assessment {
   let totalScore = 0;
   const signals: Tier4Signal[] = [];
@@ -275,7 +230,6 @@ function tier4Check(text: string, domain: ParserDomain, languageHint?: string, d
   }
 
   if (domain === 'legal') {
-     // LEGAL TIER 4 CHECKS
      const indexMatch = text.match(LEGAL_INDEX_REGEX);
      if (indexMatch) {
          totalScore += 0.40;
@@ -294,21 +248,18 @@ function tier4Check(text: string, domain: ParserDomain, languageHint?: string, d
          signals.push({ feature: 'legal_header', weight: 0.30, description: `Found Court jurisdiction: ${courtMatch[0]}` });
      }
 
-     // Contract Checks
      const contractMatch = text.match(CONTRACT_HEADER_REGEX);
      if (contractMatch) {
          totalScore += 0.50;
          signals.push({ feature: 'legal_header', weight: 0.50, description: 'Detected Contract/Agreement structure' });
      }
   } else {
-      // LINGUISTIC TIER 4 CHECKS
       const orthoMatches = (text.match(COMPLEX_ORTHO_REGEX) || []).length;
       if (orthoMatches > 5) {
           totalScore += 0.40;
           signals.push({ feature: 'orthographic_complexity', weight: 0.40, description: `High density of complex graphemes (n=${orthoMatches})` });
       }
       
-      // Basic check for non-Latin script density (indicates need for specialized parser)
       const nonLatinMatch = text.match(/[^\u0000-\u007F]/g);
       if (nonLatinMatch && nonLatinMatch.length / text.length > 0.3) {
            totalScore += 0.30;
@@ -341,7 +292,6 @@ function calculateConfidence(line: string, profile: LanguageProfile, domain: Par
   
   if (!clean) return { score: 0, warnings: ['Empty'] };
 
-  // --- LEGAL HEURISTICS ---
   if (domain === 'legal') {
      if (LEGAL_KEYWORDS_REGEX.test(clean.toUpperCase())) {
          score += 0.4;
@@ -352,23 +302,19 @@ function calculateConfidence(line: string, profile: LanguageProfile, domain: Par
      if (LEGAL_VS_REGEX.test(clean)) {
          score += 0.35;
      }
-     // Contract Heuristics
      if (CONTRACT_RECITALS_REGEX.test(clean) || CONTRACT_DEFINITIONS_REGEX.test(clean)) {
          score += 0.4;
      }
 
-     // Penalize standalone numbers or very short lines in legal (usually page numbers/line numbers)
      if (clean.length < 4 && DIGIT_REGEX.test(clean)) {
          score -= 0.4;
          warnings.push("Likely page number");
      }
-     // Boost longer paragraphs
      if (clean.length > 50) score += 0.1;
      
      return { score: Math.min(0.99, score), warnings };
   }
 
-  // --- LINGUISTIC HEURISTICS (Existing Logic) ---
   if (STRONG_NATIVE_CHAR_REGEX.test(clean)) score += 0.35;
   if (profile === 'morphological_dense' && MORPH_DENSE_MARKER_REGEX.test(clean)) score += 0.15; 
 
@@ -396,16 +342,15 @@ export function parseIGT(
     domain: ParserDomain = 'linguistic',
     sourceMetadata: Partial<IGTXSource> = {},
     filename?: string,
-    pdfDiagnostics?: PdfTextDiagnostics
+    pdfDiagnostics?: PdfTextDiagnostics,
+    customRules: CustomRule[] = []
 ): ParseReport {
   const normalizedText = rawText.normalize('NFC');
   
   let detectedLang = sourceMetadata.language || '';
 
-  // 1. Language Detection (if not provided)
   if (!detectedLang && normalizedText.length > 20) {
       try {
-          // franc returns ISO 639-3 code (e.g. 'eng', 'rus', 'zho')
           const guess = franc(normalizedText);
           if (guess && guess !== 'und') {
               detectedLang = guess;
@@ -415,10 +360,8 @@ export function parseIGT(
       }
   }
 
-  // Fallback
   if (!detectedLang) detectedLang = 'und';
 
-  // 2. Profile Inference (if generic)
   if (profile === 'generic' && LANG_PROFILE_MAP[detectedLang]) {
       profile = LANG_PROFILE_MAP[detectedLang];
   }
@@ -430,13 +373,13 @@ export function parseIGT(
   let extractedCount = 0;
   let totalConfidence = 0;
 
+  // --- Main Extraction Loop ---
   rawLines.forEach((line, index) => {
     const trimmed = line.trim();
     if (!trimmed) return;
 
     const { score, warnings } = calculateConfidence(trimmed, profile, domain);
     
-    // Threshold filtering
     const THRESHOLD = domain === 'legal' ? 0.35 : 0.45;
 
     if (score >= THRESHOLD) {
@@ -460,7 +403,48 @@ export function parseIGT(
     }
   });
 
-  // Construct IGTX
+  // --- Holistic Legal Analysis (Timeline) ---
+  let timeline: any[] = [];
+  if (domain === 'legal') {
+      const legalAnalyzer = new LegalAnalyzer();
+      // Analyze the FULL text for dates/signatures, not just blocks
+      const legalResult = legalAnalyzer.analyze({
+          id: 'temp-current',
+          content: normalizedText,
+          documentType: 'current'
+      });
+      timeline = legalResult.dates;
+  }
+
+  // --- Custom Rules Engine ---
+  const customExtractions: CustomExtraction[] = [];
+  if (customRules && customRules.length > 0) {
+      customRules.forEach(rule => {
+          if (!rule.active) return;
+          try {
+              const regex = new RegExp(rule.pattern, rule.flags || 'gi');
+              let match;
+              // Iterate matches
+              while ((match = regex.exec(normalizedText)) !== null) {
+                  // Extract context (20 chars before/after)
+                  const start = Math.max(0, match.index - 20);
+                  const end = Math.min(normalizedText.length, match.index + match[0].length + 20);
+                  const context = normalizedText.slice(start, end).replace(/\n/g, ' ');
+
+                  customExtractions.push({
+                      ruleId: rule.id,
+                      ruleName: rule.name,
+                      match: match[0],
+                      index: match.index,
+                      context: context
+                  });
+              }
+          } catch(e) {
+              console.warn(`Rule ${rule.name} failed:`, e);
+          }
+      });
+  }
+
   const igtxBlocks: IGTXBlock[] = blocks.map(b => ({
       block_id: b.id.replace('blk-', ''),
       position: b.lineNumber,
@@ -534,6 +518,8 @@ export function parseIGT(
       extractedLines: extractedCount,
       averageConfidence: extractedCount > 0 ? (totalConfidence / extractedCount) : 0
     },
-    igtxDocument
+    igtxDocument,
+    timeline,
+    customExtractions
   };
 }

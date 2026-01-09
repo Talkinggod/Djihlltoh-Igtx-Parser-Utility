@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParseReport, ParserDomain } from '../types';
 import { generateExportContent, ExportFormat } from '../services/exportService';
 import { enrichReportWithSemantics } from '../services/aiService';
-import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink, GitBranch, AlertCircle, Bookmark, ClipboardCheck, Siren, Bomb, Star, Shield, Flag } from 'lucide-react';
+import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink, GitBranch, AlertCircle, Bookmark, ClipboardCheck, Siren, Bomb, Star, Shield, Flag, Clock } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
@@ -11,6 +11,7 @@ import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { UILanguage } from '../types';
 import { translations } from '../services/translations';
+import { TimelineView } from './TimelineView';
 
 interface OutputSectionProps {
   report: ParseReport | null;
@@ -104,10 +105,6 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
       }
   };
 
-  const handleCitationLookup = (query: string) => {
-      window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
-  };
-
   const isStage2Complete = report?.igtxDocument.blocks.some(b => 
       domain === 'legal' ? b.legal_state?.parties?.length && b.legal_state.parties.length > 0 : b.semantic_state?.predicate !== null
   );
@@ -137,6 +134,7 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
           <TabsList className="bg-muted/50">
             <TabsTrigger value="editor">{t.tab_clean}</TabsTrigger>
             <TabsTrigger value="report">{t.tab_pipeline}</TabsTrigger>
+            {domain === 'legal' && <TabsTrigger value="timeline" className="flex items-center gap-1"><Clock className="w-3 h-3"/> Timeline</TabsTrigger>}
             <TabsTrigger value="json">{t.tab_schema}</TabsTrigger>
           </TabsList>
 
@@ -197,6 +195,12 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
             </pre>
           </TabsContent>
 
+          {domain === 'legal' && (
+              <TabsContent value="timeline" className="min-h-full mt-0 p-0">
+                  <TimelineView dates={report.timeline || []} />
+              </TabsContent>
+          )}
+
           <TabsContent value="report" className="min-h-full mt-0 p-6 space-y-6">
              {/* Header Info */}
              <div className="flex flex-col gap-4">
@@ -212,91 +216,30 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                         </code>
                     </div>
                  </div>
-                 
-                 {report.metadata.tier4Assessment?.requiresTier4 && (
-                   <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 flex flex-col gap-3">
-                     <div className="flex items-start gap-3">
-                        <ShieldAlert className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
-                        <div>
-                           <p className="text-sm font-semibold text-amber-500 mb-1">
-                               {domain === 'legal' ? "Legal Structure Detected" : t.tier4_alert}
-                           </p>
-                           <p className="text-xs text-muted-foreground">{report.metadata.tier4Assessment.recommendedAction}.</p>
-                        </div>
+             </div>
+
+             {/* Custom Extraction Results */}
+             {report.customExtractions && report.customExtractions.length > 0 && (
+                 <div className="space-y-3">
+                     <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                         <RegexIcon className="w-4 h-4 text-primary" /> Rule-Based Extractions
+                     </h4>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                         {report.customExtractions.map((ex, i) => (
+                             <div key={i} className="bg-background border p-3 rounded-md shadow-sm">
+                                 <div className="flex justify-between items-center mb-1">
+                                     <Badge variant="outline" className="text-[10px] font-bold uppercase">{ex.ruleName}</Badge>
+                                     <span className="text-[9px] text-muted-foreground font-mono">@{ex.index}</span>
+                                 </div>
+                                 <div className="text-sm font-semibold text-primary">{ex.match}</div>
+                                 <div className="text-xs text-muted-foreground mt-1 truncate">"...{ex.context}..."</div>
+                             </div>
+                         ))}
                      </div>
-                   </div>
-                 )}
-             </div>
-
-             {/* Pipeline Visualizer */}
-             <div className="relative">
-                 <div className="absolute left-6 rtl:right-6 rtl:left-auto top-6 bottom-6 w-0.5 bg-border/50"></div>
-                 <div className="space-y-8 relative">
-                    
-                    {/* Stage 1 Node */}
-                    <div className="flex gap-4 items-start">
-                        <div className="w-12 h-12 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center shrink-0 z-10 bg-background">
-                            <Braces className="w-5 h-5 text-primary" />
-                        </div>
-                        <div className="flex-1 pt-1">
-                            <h4 className="text-sm font-semibold">Stage 1: {domain === 'legal' ? "Structure Parsing" : "Canonicalization"}</h4>
-                            <div className="grid grid-cols-2 gap-3 mb-2 mt-2">
-                                <Card className="bg-muted/10 border-border shadow-none">
-                                    <CardContent className="p-3">
-                                        <div className="text-[10px] font-medium text-muted-foreground uppercase mb-1">{t.stats_items}</div>
-                                        <div className="text-xl font-bold font-mono text-foreground">{report.stats.extractedLines}</div>
-                                    </CardContent>
-                                </Card>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Stage 2 Node */}
-                    <div className={cn("flex gap-4 items-start transition-opacity duration-500", isStage2Complete ? "opacity-100" : "opacity-80")}>
-                         <div className={cn("w-12 h-12 rounded-full border-2 flex items-center justify-center shrink-0 z-10 bg-background transition-colors", isStage2Complete ? "border-purple-500 bg-purple-500/10 text-purple-500" : "border-muted-foreground/30 bg-muted text-muted-foreground")}>
-                            {isEnriching ? <Loader2 className="w-5 h-5 animate-spin" /> : <BrainCircuit className="w-5 h-5" />}
-                         </div>
-                         <div className="flex-1 pt-1">
-                            <h4 className="text-sm font-semibold flex items-center gap-2">
-                                Stage 2: {domain === 'legal' ? "Legal Analysis" : "Semantic State"}
-                                {isStage2Complete && <Badge variant="outline" className="text-[10px] text-purple-500 border-purple-500/30">ENRICHED</Badge>}
-                            </h4>
-                            <p className="text-xs text-muted-foreground mb-3">
-                                {isStage2Complete 
-                                  ? `AI has analyzed ${domain === 'legal' ? "risks, obligations, and parties" : "predicates and arguments"}.` 
-                                  : "Ready to extract metadata via Gemini."}
-                            </p>
-                            
-                            {!isStage2Complete && !isEnriching && (
-                                <Button 
-                                    size="sm" 
-                                    variant="outline" 
-                                    className="gap-2 text-xs border-purple-500/30 hover:bg-purple-500/5 hover:text-purple-500 text-muted-foreground"
-                                    onClick={handleAiEnrichment}
-                                    disabled={!onUpdateReport}
-                                >
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    {domain === 'legal' ? "Analyze Contract" : "Enrich (AI)"}
-                                </Button>
-                            )}
-
-                            {isEnriching && (
-                                <div className="space-y-2 mt-2">
-                                    <div className="flex justify-between text-[10px] text-muted-foreground">
-                                        <span>Processing blocks...</span>
-                                        <span>{enrichmentProgress}%</span>
-                                    </div>
-                                    <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                                        <div className="h-full bg-purple-500 transition-all duration-300" style={{ width: `${enrichmentProgress}%` }} />
-                                    </div>
-                                </div>
-                            )}
-                         </div>
-                    </div>
-
                  </div>
-             </div>
+             )}
 
+             {/* Extraction Log */}
              <div>
                <h4 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
                  <AlignLeft className="w-4 h-4" /> Extraction Log
@@ -306,32 +249,18 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                     const analysis = block.legal_state?.contract_analysis;
                     const hasHighRisk = analysis?.risks?.some(r => r.severity === 'critical' || r.severity === 'high');
                     const hasFavorable = analysis?.risks?.some(r => r.impact === 'favorable');
-                    const isOperative = analysis?.component_type === 'operative_clause';
                     
                     return (
                     <div key={block.id} className={cn(
                         "p-4 bg-card rounded-lg border transition-colors group relative overflow-hidden",
                         hasHighRisk ? "border-red-500/30 bg-red-500/5" : (hasFavorable ? "border-emerald-500/30 bg-emerald-500/5" : "border-border hover:border-primary/50")
                     )}>
-                       {hasHighRisk && <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-bl-lg" />}
-                       {hasFavorable && !hasHighRisk && <div className="absolute top-0 right-0 w-2 h-2 bg-emerald-500 rounded-bl-lg" />}
-                       
                        <div className="flex justify-between items-start mb-3">
                           <div className="flex items-center gap-2">
                               <Badge variant="outline" className="font-mono text-[10px] text-muted-foreground">Ln {block.lineNumber}</Badge>
                               {(block.semantic_state?.provenance || block.legal_state?.provenance) && (
                                   <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-600 bg-purple-500/5 gap-1">
                                       <BrainCircuit className="w-3 h-3" /> AI
-                                  </Badge>
-                              )}
-                              {analysis?.core_element && (
-                                  <Badge variant="default" className="text-[10px] bg-indigo-600 hover:bg-indigo-700 font-bold uppercase tracking-wider">
-                                      {analysis.core_element}
-                                  </Badge>
-                              )}
-                              {analysis?.component_type && analysis.component_type !== 'other' && (
-                                  <Badge variant="secondary" className="text-[10px] uppercase">
-                                      {analysis.component_type.replace('_', ' ')}
                                   </Badge>
                               )}
                           </div>
@@ -341,91 +270,6 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                        <div className="text-sm font-medium text-primary mb-2 font-mono break-words bg-primary/5 p-2 rounded overflow-x-auto whitespace-pre custom-scrollbar" dir="ltr">
                          {block.extractedLanguageLine}
                        </div>
-
-                       {/* NEW: Contract Analysis Visualization */}
-                       {analysis && (
-                           <div className="space-y-3 mt-3">
-                                {/* Risk Register */}
-                                {analysis.risks && analysis.risks.length > 0 && (
-                                    <div className="flex flex-col gap-2">
-                                        {analysis.risks.map((risk, i) => {
-                                            // Determination Logic for Visuals
-                                            const isAdverse = risk.impact === 'adverse';
-                                            const isFavorable = risk.impact === 'favorable';
-                                            const isCritical = risk.severity === 'critical';
-                                            const isHigh = risk.severity === 'high';
-
-                                            return (
-                                                <div key={i} className={cn(
-                                                    "p-2 rounded text-xs flex items-start gap-2 border shadow-sm",
-                                                    // Critical + Adverse = Red Bomb (Explosive)
-                                                    isCritical && isAdverse ? "bg-red-100 dark:bg-red-900/20 border-red-500/50 text-red-700 dark:text-red-400" :
-                                                    // Critical + Favorable = Green Star (Strategic Win)
-                                                    isCritical && isFavorable ? "bg-emerald-100 dark:bg-emerald-900/20 border-emerald-500/50 text-emerald-700 dark:text-emerald-400" :
-                                                    // High Adverse = Red Alert
-                                                    isHigh && isAdverse ? "bg-red-50 dark:bg-red-900/10 border-red-200 text-red-600" :
-                                                    // High Favorable = Green Shield
-                                                    isHigh && isFavorable ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 text-emerald-600" :
-                                                    // Default Warning
-                                                    "bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-500"
-                                                )}>
-                                                    <div className="shrink-0 mt-0.5">
-                                                        {isCritical && isAdverse ? <Bomb className="w-4 h-4 fill-red-500/20 animate-pulse" /> : 
-                                                         isCritical && isFavorable ? <Star className="w-4 h-4 fill-emerald-500/20" /> :
-                                                         isHigh && isAdverse ? <Siren className="w-4 h-4" /> :
-                                                         isHigh && isFavorable ? <Shield className="w-4 h-4" /> :
-                                                         <AlertTriangle className="w-4 h-4" />}
-                                                    </div>
-                                                    <div>
-                                                        <div className="font-bold uppercase text-[10px] flex items-center gap-2">
-                                                            {risk.category} • {risk.severity} {isFavorable ? 'Advantage' : 'Risk'}
-                                                        </div>
-                                                        <div className="mt-0.5">{risk.description}</div>
-                                                        {risk.mitigation && <div className="mt-1 text-[10px] opacity-80 italic">Tip: {risk.mitigation}</div>}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-
-                                {/* Obligations */}
-                                {analysis.obligations && analysis.obligations.length > 0 && (
-                                    <div className="bg-blue-500/5 border border-blue-500/20 p-2 rounded">
-                                        <div className="text-[10px] font-bold text-blue-600 mb-1 flex items-center gap-1">
-                                            <ClipboardCheck className="w-3 h-3" /> OBLIGATIONS
-                                        </div>
-                                        <ul className="space-y-1">
-                                            {analysis.obligations.map((obs, i) => (
-                                                <li key={i} className="text-xs text-foreground/80 flex gap-1">
-                                                    <span className="font-semibold text-blue-700">{obs.actor}:</span>
-                                                    <span>{obs.action}</span>
-                                                    {obs.deadline && <Badge variant="outline" className="text-[8px] h-4 ml-1">{obs.deadline}</Badge>}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Statutory Conflicts */}
-                                {analysis.statutory_conflict && (
-                                    <div className="flex items-center gap-2 text-xs text-destructive font-semibold bg-destructive/5 p-2 rounded border border-destructive/20">
-                                        <Gavel className="w-3 h-3" />
-                                        CONFLICT: {analysis.statutory_conflict}
-                                    </div>
-                                )}
-                           </div>
-                       )}
-
-                       {/* Structure Analysis */}
-                       {block.structural && (
-                            <div className="flex items-center gap-2 mt-2 opacity-50 hover:opacity-100 transition-opacity">
-                                <Badge variant="outline" className="text-[9px] h-4 px-1 font-normal flex items-center gap-1 border-none text-muted-foreground">
-                                    <GitBranch className="w-3 h-3" />
-                                    {block.structural.clauseType.replace('_', ' ')}
-                                </Badge>
-                            </div>
-                       )}
                     </div>
                   )})}
                </div>
@@ -442,3 +286,9 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
     </Card>
   );
 };
+
+function RegexIcon({ className }: { className?: string }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4 17h16M4 20h16M7 15h2M13 15h2M7 15l2-2M13 15l2-2M17 4v10M13 4l4 4M21 8l-4-4"/></svg>
+    );
+}

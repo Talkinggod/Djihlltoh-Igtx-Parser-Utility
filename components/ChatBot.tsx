@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2, Settings, Lock, Check, FileCheck, Globe, Database, FolderSearch, Gavel, Tag } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2, Settings, Lock, Check, FileCheck, Globe, Database, FolderSearch, Gavel, Tag, StopCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
@@ -61,6 +61,60 @@ const languageMap: Record<string, string> = {
     'ar': 'Arabic'
 };
 
+// --- Audio Utils for Gemini Live API ---
+
+function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function createPcmBlob(data: Float32Array): { data: string, mimeType: string } {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
+    int16[i] = Math.max(-32768, Math.min(32767, data[i] * 32768));
+  }
+  return {
+    data: encode(new Uint8Array(int16.buffer)),
+    mimeType: 'audio/pcm;rate=16000',
+  };
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      // Convert Int16 back to Float32
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
+
 export const ChatBot: React.FC<ChatBotProps> = ({ 
     apiKey, domain, profile, context, onUpdateEditor, onUpdateDraft, onUpdateCaseState,
     caseContext, localSyncInfo, lang, allDocuments, templates, googleUser
@@ -96,20 +150,23 @@ export const ChatBot: React.FC<ChatBotProps> = ({
 
     // --- Live API State ---
     const [isLive, setIsLive] = useState(false);
+    const [isConnecting, setIsConnecting] = useState(false);
+    
     const inputAudioContextRef = useRef<AudioContext | null>(null);
     const outputAudioContextRef = useRef<AudioContext | null>(null);
     const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const nextStartTimeRef = useRef<number>(0);
     const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-    const analyserRef = useRef<AnalyserNode | null>(null);
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const animationFrameRef = useRef<number | null>(null);
+    
+    // Transcription State
+    const [currentInputTranscription, setCurrentInputTranscription] = useState("");
+    const [currentOutputTranscription, setCurrentOutputTranscription] = useState("");
 
     useEffect(() => {
         if (isOpen) {
             messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
-    }, [messages, isOpen]);
+    }, [messages, isOpen, currentInputTranscription, currentOutputTranscription]);
 
     useEffect(() => {
         const newWelcome = domain === 'legal' ? translations[lang].chatbot_welcome_legal : translations[lang].chatbot_welcome_linguistic;
@@ -120,6 +177,13 @@ export const ChatBot: React.FC<ChatBotProps> = ({
             timestamp: new Date()
         }]);
     }, [domain, lang]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            disconnectLiveSession();
+        };
+    }, []);
 
     // --- SCOPE HANDLER ---
     const handleSetScope = async () => {
@@ -142,8 +206,236 @@ export const ChatBot: React.FC<ChatBotProps> = ({
         setPrivileges(p => ({ ...p, driveScope: undefined }));
     };
 
-    // --- AUDIO UTILS (Simplified for brevity) ---
-    // ... [Same as before] ...
+    // --- LIVE API HANDLERS ---
+
+    const buildSystemInstruction = () => {
+        let instruction = domain === 'legal' 
+            ? "You are a professional legal assistant. Be concise, procedural, and professional. You have access to the case documents." 
+            : "You are a linguistic expert assistant. You have access to the texts.";
+
+        // Inject Context
+        let richContext = "";
+        if (caseContext) {
+             richContext += `[CASE METADATA]\nID: ${caseContext.id}\nName: ${caseContext.name}\nDocType: ${caseContext.docType}\nFiling Date: ${caseContext.refDate.toISOString()}\n\n`;
+             if (caseContext.events.length > 0) {
+                 richContext += `[CASE EVENTS]\n${caseContext.events.map(e => `- [${e.type}] ${e.title}: ${e.message}`).join('\n')}\n\n`;
+             }
+        }
+        if (context) {
+            richContext += `[ACTIVE SOURCE DOCUMENT]\n${context.slice(0, 5000)}...\n\n`;
+        }
+        if (privileges.allowFullCaseContext && allDocuments && allDocuments.length > 0) {
+             richContext += `[CASE REPOSITORY]\n`;
+             allDocuments.forEach((doc, idx) => {
+                 richContext += `--- Document ${idx + 1}: ${doc.name} ---\n${doc.content.slice(0, 2000)}...\n\n`;
+             });
+        }
+        if (privileges.allowTemplates && templates && templates.length > 0) {
+             richContext += `[AVAILABLE TEMPLATES]\n`;
+             templates.forEach(t => {
+                 richContext += `Template Name: "${t.name}" (${t.category})\nContent:\n${t.content.slice(0, 500)}...\n\n`;
+             });
+        }
+
+        return instruction + "\n\nCONTEXT:\n" + richContext;
+    };
+
+    const connectLiveSession = async () => {
+        if (!apiKey) {
+            alert("Please enter your API Key first.");
+            return;
+        }
+        
+        setIsConnecting(true);
+
+        try {
+            const ai = new GoogleGenAI({ apiKey });
+            
+            // Audio Contexts
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            
+            // Input: 16kHz required by Gemini Live
+            inputAudioContextRef.current = new AudioContextClass({ sampleRate: 16000 });
+            // Output: 24kHz standard for Gemini Live responses
+            outputAudioContextRef.current = new AudioContextClass({ sampleRate: 24000 });
+            
+            nextStartTimeRef.current = 0;
+
+            let mediaStream: MediaStream;
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (err) {
+                alert("Microphone access denied or not available.");
+                setIsConnecting(false);
+                return;
+            }
+
+            const systemInstruction = buildSystemInstruction();
+
+            const sessionPromise = ai.live.connect({
+                model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+                config: {
+                    responseModalities: [Modality.AUDIO],
+                    speechConfig: {
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
+                    },
+                    systemInstruction: { parts: [{ text: systemInstruction }]},
+                    // Enable transcription to display chat bubbles
+                    inputAudioTranscription: { model: "gemini-2.5-flash-native-audio-preview-12-2025" },
+                    outputAudioTranscription: { model: "gemini-2.5-flash-native-audio-preview-12-2025" }
+                },
+                callbacks: {
+                    onopen: () => {
+                        console.log("Live Session Opened");
+                        setIsLive(true);
+                        setIsConnecting(false);
+
+                        // Setup Input Stream
+                        const ctx = inputAudioContextRef.current;
+                        if (ctx) {
+                            const source = ctx.createMediaStreamSource(mediaStream);
+                            // bufferSize 4096, 1 input channel, 1 output channel
+                            // Using ScriptProcessor for broader compatibility without worklet files
+                            const processor = ctx.createScriptProcessor(4096, 1, 1);
+                            
+                            processor.onaudioprocess = (e) => {
+                                const inputData = e.inputBuffer.getChannelData(0);
+                                const pcmBlob = createPcmBlob(inputData);
+                                sessionPromise.then((session) => {
+                                    session.sendRealtimeInput({ media: pcmBlob });
+                                });
+                            };
+
+                            source.connect(processor);
+                            processor.connect(ctx.destination);
+                        }
+                    },
+                    onmessage: async (message: LiveServerMessage) => {
+                        // 1. Handle Audio Output
+                        const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                        if (audioData && outputAudioContextRef.current) {
+                            const ctx = outputAudioContextRef.current;
+                            nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+                            
+                            const audioBytes = decode(audioData);
+                            const audioBuffer = await decodeAudioData(audioBytes, ctx, 24000, 1);
+                            
+                            const source = ctx.createBufferSource();
+                            source.buffer = audioBuffer;
+                            source.connect(ctx.destination);
+                            
+                            source.addEventListener('ended', () => {
+                                sourcesRef.current.delete(source);
+                            });
+                            
+                            source.start(nextStartTimeRef.current);
+                            nextStartTimeRef.current += audioBuffer.duration;
+                            sourcesRef.current.add(source);
+                        }
+
+                        // 2. Handle Transcription (User)
+                        if (message.serverContent?.inputTranscription) {
+                            const text = message.serverContent.inputTranscription.text;
+                            if (text) setCurrentInputTranscription(prev => prev + text);
+                        }
+
+                        // 3. Handle Transcription (Model)
+                        if (message.serverContent?.outputTranscription) {
+                            const text = message.serverContent.outputTranscription.text;
+                            if (text) setCurrentOutputTranscription(prev => prev + text);
+                        }
+
+                        // 4. Handle Turn Complete (Push to history)
+                        if (message.serverContent?.turnComplete) {
+                            // We need to commit the current transcriptions to the message history
+                            // Using functional updates to ensure we have the latest state values inside callback
+                            setCurrentInputTranscription(prevInput => {
+                                if (prevInput.trim()) {
+                                    setMessages(prevMsgs => [...prevMsgs, {
+                                        id: Date.now().toString() + '-user',
+                                        role: 'user',
+                                        text: prevInput,
+                                        timestamp: new Date()
+                                    }]);
+                                }
+                                return "";
+                            });
+
+                            setCurrentOutputTranscription(prevOutput => {
+                                if (prevOutput.trim()) {
+                                    setMessages(prevMsgs => [...prevMsgs, {
+                                        id: Date.now().toString() + '-model',
+                                        role: 'model',
+                                        text: prevOutput,
+                                        timestamp: new Date()
+                                    }]);
+                                }
+                                return "";
+                            });
+                        }
+
+                        // 5. Handle Interruption
+                        if (message.serverContent?.interrupted) {
+                            sourcesRef.current.forEach(source => {
+                                try { source.stop(); } catch(e) {}
+                            });
+                            sourcesRef.current.clear();
+                            nextStartTimeRef.current = 0;
+                            // Reset current transcriptions on interrupt to avoid stale partials
+                            setCurrentOutputTranscription(""); 
+                        }
+                    },
+                    onclose: () => {
+                        console.log("Live Session Closed");
+                        setIsLive(false);
+                    },
+                    onerror: (e) => {
+                        console.error("Live Session Error", e);
+                        setIsLive(false);
+                        setIsConnecting(false);
+                    }
+                }
+            });
+            sessionPromiseRef.current = sessionPromise;
+
+        } catch (e) {
+            console.error("Failed to connect live", e);
+            setIsConnecting(false);
+            alert("Failed to start Live session. Check console.");
+        }
+    };
+
+    const disconnectLiveSession = () => {
+        if (sessionPromiseRef.current) {
+            sessionPromiseRef.current.then(s => s.close());
+            sessionPromiseRef.current = null;
+        }
+        
+        inputAudioContextRef.current?.close();
+        outputAudioContextRef.current?.close();
+        inputAudioContextRef.current = null;
+        outputAudioContextRef.current = null;
+        
+        setIsLive(false);
+        setIsConnecting(false);
+        
+        // Commit any pending transcriptions
+        if (currentInputTranscription.trim()) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: currentInputTranscription, timestamp: new Date() }]);
+        }
+        if (currentOutputTranscription.trim()) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: currentOutputTranscription, timestamp: new Date() }]);
+        }
+        setCurrentInputTranscription("");
+        setCurrentOutputTranscription("");
+    };
+
+    const toggleLive = () => {
+        if (isLive) disconnectLiveSession();
+        else connectLiveSession();
+    };
+
+    // --- STANDARD CHAT HANDLER ---
 
     const handleSend = async () => {
         if (!input.trim()) return;
@@ -393,7 +685,47 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                             <h4 className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-2">
                                 <Lock className="w-3 h-3" /> AI Access Privileges
                             </h4>
-                            {/* ... (Existing privilege checkboxes) ... */}
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                    <input type="checkbox" checked={privileges.allowFullCaseContext} onChange={(e) => setPrivileges({...privileges, allowFullCaseContext: e.target.checked})} className="rounded border-primary/20" />
+                                    Read Full Case Context
+                                </label>
+                                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                    <input type="checkbox" checked={privileges.allowTemplates} onChange={(e) => setPrivileges({...privileges, allowTemplates: e.target.checked})} className="rounded border-primary/20" />
+                                    Access Templates
+                                </label>
+                                {localSyncInfo && (
+                                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                        <input type="checkbox" checked={privileges.allowLocalFileSystem} onChange={(e) => setPrivileges({...privileges, allowLocalFileSystem: e.target.checked})} className="rounded border-primary/20" />
+                                        Access Local Folder ({localSyncInfo.fileCount} files)
+                                    </label>
+                                )}
+                                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                    <input type="checkbox" checked={privileges.allowWebSearch} onChange={(e) => setPrivileges({...privileges, allowWebSearch: e.target.checked})} className="rounded border-primary/20" />
+                                    Web Search (Grounding)
+                                </label>
+                            </div>
+                            
+                            {/* Drive Scope */}
+                            <div className="pt-2 border-t border-dashed">
+                                <div className="flex justify-between items-center mb-1">
+                                    <h4 className="text-[10px] font-bold uppercase text-muted-foreground">Drive Scope (Intent Tunnel)</h4>
+                                    {privileges.driveScope && (
+                                        <Button size="icon" variant="ghost" className="h-4 w-4 text-destructive" onClick={clearScope}><X className="w-3 h-3"/></Button>
+                                    )}
+                                </div>
+                                {privileges.driveScope ? (
+                                    <div className="text-xs bg-blue-500/10 text-blue-600 px-2 py-1 rounded border border-blue-500/20 flex items-center gap-2">
+                                        <FolderSearch className="w-3 h-3" />
+                                        Limited to: {privileges.driveScope.name}
+                                    </div>
+                                ) : (
+                                    <Button size="sm" variant="outline" className="w-full text-xs h-7" onClick={handleSetScope} disabled={!googleUser}>
+                                        Set Folder Scope
+                                    </Button>
+                                )}
+                            </div>
+
                             <Button size="sm" className="w-full" onClick={() => setShowPrivileges(false)}>Done</Button>
                         </div>
                     )}
@@ -444,6 +776,33 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                                 </div>
                             </div>
                         ))}
+                        
+                        {/* Live Transcriptions (Transient) */}
+                        {isLive && (
+                            <>
+                                {currentInputTranscription && (
+                                    <div className="flex gap-3 max-w-[85%] ml-auto flex-row-reverse opacity-70">
+                                        <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1 bg-primary text-primary-foreground">
+                                            <User className="w-3.5 h-3.5" />
+                                        </div>
+                                        <div className="rounded-lg p-3 text-sm leading-relaxed shadow-sm bg-primary/20 text-foreground rounded-tr-none italic">
+                                            {currentInputTranscription}...
+                                        </div>
+                                    </div>
+                                )}
+                                {currentOutputTranscription && (
+                                    <div className="flex gap-3 max-w-[85%] opacity-70">
+                                        <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1 bg-muted text-muted-foreground">
+                                            <Bot className="w-3.5 h-3.5" />
+                                        </div>
+                                        <div className="rounded-lg p-3 text-sm leading-relaxed shadow-sm bg-muted/30 border border-border/50 text-foreground rounded-tl-none italic">
+                                            {currentOutputTranscription}...
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
+
                         {isLoading && (
                             <div className="flex gap-3">
                                 {/* Loading dots */}
@@ -459,13 +818,34 @@ export const ChatBot: React.FC<ChatBotProps> = ({
 
                     {/* Input Area */}
                     <div className="p-3 border-t bg-background shrink-0">
-                        {/* ... (Existing input area) ... */}
-                        <div className="relative flex items-center gap-2">
+                        {/* If Live, show simplified interface */}
+                        {isLive ? (
+                            <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-md p-2">
+                                <div className="flex items-center gap-3">
+                                    <div className="relative flex h-3 w-3">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                    </div>
+                                    <span className="text-sm font-medium text-red-500">Listening...</span>
+                                </div>
+                                <Button 
+                                    size="sm" 
+                                    variant="destructive" 
+                                    className="h-8 gap-2"
+                                    onClick={disconnectLiveSession}
+                                >
+                                    <StopCircle className="w-4 h-4" /> End Session
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="relative flex items-center gap-2">
                                 <Button 
                                     size="icon" 
-                                    variant={isLive ? "destructive" : "outline"} 
-                                    className="h-9 w-9 shrink-0"
-                                    onClick={() => alert("Live API requires manual reconfiguration in this scope.")}
+                                    variant="outline" 
+                                    className={cn("h-9 w-9 shrink-0", isConnecting && "animate-pulse")}
+                                    onClick={toggleLive}
+                                    disabled={isConnecting}
+                                    title="Start Live Voice Session"
                                 >
                                     <Mic className="w-4 h-4" />
                                 </Button>
@@ -492,6 +872,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                                     </Button>
                                 </div>
                             </div>
+                        )}
                     </div>
                 </Card>
             )}

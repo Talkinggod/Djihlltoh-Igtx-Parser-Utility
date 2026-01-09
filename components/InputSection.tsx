@@ -10,14 +10,14 @@ import { extractTextFromPdf } from '../services/pdfExtractor';
 import { scrapeUrlViaGemini } from '../services/webScraper';
 import { GoogleDriveService } from '../services/googleDriveService';
 import { PdfViewer } from './PdfViewer';
-import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain, GoogleUser } from '../types';
+import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain, GoogleUser, CustomRule } from '../types';
 import { translations } from '../services/translations';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
 
 interface InputSectionProps {
   input: string;
   setInput: (val: string) => void;
-  onProcess: (metadata: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics) => void;
+  onProcess: (metadata: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics, customRules?: CustomRule[]) => void;
   onClear: () => void;
   profile: LanguageProfile;
   setProfile: (val: LanguageProfile) => void;
@@ -31,11 +31,14 @@ interface InputSectionProps {
   setRefDate?: (date: Date) => void;
   // Google
   googleUser?: GoogleUser;
+  // Custom Rules
+  customRules?: CustomRule[];
+  onOpenRuleEditor?: () => void;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ 
     input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey, domain,
-    docTypeId, setDocTypeId, refDate, setRefDate, googleUser
+    docTypeId, setDocTypeId, refDate, setRefDate, googleUser, customRules, onOpenRuleEditor
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -219,7 +222,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
           // Inject the Document Type ID into metadata so AI Service can use it
           // @ts-ignore
           documentType: docTypeId
-      }, pdfDiagnostics);
+      }, pdfDiagnostics, customRules);
   };
 
   return (
@@ -322,12 +325,15 @@ export const InputSection: React.FC<InputSectionProps> = ({
                </div>
                
                <div className="flex items-center gap-2">
-                    <Info className="w-3 h-3 text-primary/70 shrink-0" />
-                    <span className="text-[10px] text-primary/80 font-medium">
-                        {domain === 'legal' 
-                            ? "Legal Mode active: Optimized for finding captions, index numbers, and parties." 
-                            : t.profile_disclaimer}
-                    </span>
+                    {onOpenRuleEditor && domain === 'legal' && (
+                        <button 
+                            className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-0.5 rounded transition-colors flex items-center gap-1 border border-primary/20"
+                            onClick={onOpenRuleEditor}
+                        >
+                            <Settings2 className="w-3 h-3" />
+                            {customRules && customRules.length > 0 ? `${customRules.filter(r=>r.active).length} Rules Active` : "Configure Rules"}
+                        </button>
+                    )}
                </div>
            </div>
            
