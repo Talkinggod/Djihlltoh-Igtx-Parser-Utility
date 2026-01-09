@@ -1,5 +1,4 @@
 
-
 export type ParserDomain = 'linguistic' | 'legal';
 
 export type LanguageProfile = 
@@ -13,6 +12,13 @@ export type LanguageProfile =
   | 'legal_statute';
 
 export type UILanguage = 'en' | 'zh-CN' | 'zh-TW' | 'ar';
+
+export interface GoogleUser {
+    name: string;
+    email: string;
+    picture: string;
+    accessToken: string;
+}
 
 // --- Intelligent Document Type System ---
 
@@ -191,7 +197,7 @@ export interface IGTXSource {
   year: number | null;
   language: string; // ISO-639-3
   orthography: string;
-  source_type: 'pdf' | 'scan' | 'field_notes' | 'legacy_text' | 'web_scrape' | 'unknown';
+  source_type: 'pdf' | 'scan' | 'field_notes' | 'legacy_text' | 'web_scrape' | 'google_drive' | 'unknown';
   // Guardrail 1: Explicit Provenance for AI/Web sources
   source_url?: string;
   retrieval_method?: string;
@@ -309,6 +315,49 @@ export interface CaseMetadata {
     indexNumber: string;
 }
 
+// NEW: Drafting & Templates
+export interface Template {
+    id: string;
+    name: string;
+    content: string; // The markdown/text structure
+    category: 'Motion' | 'Affidavit' | 'Contract' | 'Order' | 'Other';
+}
+
+export interface Draft {
+    id: string;
+    title: string;
+    content: string; // The editable text
+    createdAt: string;
+    updatedAt: string;
+    status: 'Draft' | 'Final';
+}
+
+export interface DriveScope {
+    id: string;
+    name: string;
+    type: 'folder' | 'file_set';
+}
+
+// NEW: AI Access Control
+export interface AIPrivileges {
+    allowFullCaseContext: boolean; // Access all documents in case
+    allowTemplates: boolean; // Access to stored templates
+    allowWebSearch: boolean; // Access to Google Search
+    allowLocalFileSystem: boolean; // Access to synced local folder
+    driveScope?: DriveScope; // The "Intent Tunnel" Scope
+}
+
+// --- File Explorer Types ---
+export interface ExplorerItem {
+    id: string;
+    name: string;
+    kind: 'file' | 'directory';
+    mimeType?: string; // for Google
+    handle?: any; // For Local FileSystemHandle
+    size?: string;
+    modified?: string;
+}
+
 export interface CaseState {
     id: string;
     name: string; // e.g. "Complaint - Smith v Jones"
@@ -340,8 +389,17 @@ export interface CaseState {
     documents: StoredDocument[];
     exhibits: StoredExhibit[];
     notes: Note[];
+
+    // NEW: Drafting
+    templates: Template[];
+    drafts: Draft[];
+    activeDraftId?: string;
     
     // Local File System Sync
     localSyncEnabled: boolean;
     directoryHandle?: any; // FileSystemDirectoryHandle (Not serializable to localStorage)
+
+    // Google Drive Sync
+    googleFolderId?: string;
+    googleFolderName?: string;
 }

@@ -16,6 +16,7 @@ const textLayerStyles = `
     line-height: 1.0;
     text-size-adjust: none;
     pointer-events: none;
+    --scale-factor: 1;
   }
   .textLayer span {
     color: transparent;
@@ -53,7 +54,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file }) => {
         // Dynamic import
         // @ts-ignore
         const pdfjsModule = await import('pdfjs-dist');
-        const lib = pdfjsModule.default || pdfjsModule;
+        
+        // Merge named exports and default export to ensure we capture getDocument AND renderTextLayer
+        // This handles differences in ESM vs CommonJS builds/environments
+        const lib = { ...pdfjsModule, ...(pdfjsModule.default || {}) };
         
         if (active) {
           if (lib.GlobalWorkerOptions && !lib.GlobalWorkerOptions.workerSrc) {
@@ -270,6 +274,8 @@ const PdfPage: React.FC<PdfPageProps> = ({ pageNumber, pdf, scale, pdfLib }) => 
               viewport: viewport
             });
             await textLayerRenderTask.promise;
+          } else {
+             console.warn("renderTextLayer is not available in pdfLib. Text selection disabled.");
           }
         }
 

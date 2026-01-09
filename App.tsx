@@ -4,21 +4,43 @@ import { Header } from './components/Header';
 import { CaseSidebar } from './components/CaseSidebar';
 import { CaseWorkspace } from './components/CaseWorkspace';
 import { CreateCaseDialog } from './components/CreateCaseDialog';
+import { FileExplorerModal } from './components/FileExplorerModal';
 import { parseIGT } from './services/igtxParser';
-import { IGTXSource, UILanguage, PdfTextDiagnostics, CaseState, CaseEvent, CaseMetadata } from './types';
+import { IGTXSource, UILanguage, PdfTextDiagnostics, CaseState, CaseEvent, CaseMetadata, GoogleUser, ExplorerItem, StoredDocument } from './types';
 import { DocumentTypeService } from './services/documentTypeService';
 import { translations } from './services/translations';
 import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 import { ChatBot } from './components/ChatBot';
 import { Button } from './components/ui/button';
 import { FileSystemService } from './services/fileSystemService';
+import { extractTextFromPdf } from './services/pdfExtractor';
+import { GoogleDriveService } from './services/googleDriveService';
 import { cn } from './lib/utils';
 
 const STORAGE_KEY = 'dziltoo_cases_v1';
 
 function App() {
   const [lang, setLang] = useState<UILanguage>('en');
+  const [googleUser, setGoogleUser] = useState<GoogleUser | undefined>(undefined);
+  const [isIframe, setIsIframe] = useState(false);
   
+  // File Explorer State
+  const [explorerState, setExplorerState] = useState<{
+      isOpen: boolean;
+      mode: 'local' | 'google';
+  }>({ isOpen: false, mode: 'local' });
+
+  // Detect Iframe Environment
+  useEffect(() => {
+      try {
+          if (window.self !== window.top) {
+              setIsIframe(true);
+          }
+      } catch (e) {
+          setIsIframe(true); // Security error usually means cross-origin iframe
+      }
+  }, []);
+
   // API Key
   const [apiKey, setApiKey] = useState<string>(() => {
     let envKey = '';
@@ -75,6 +97,8 @@ function App() {
           documents: [],
           exhibits: [],
           notes: [],
+          templates: [],
+          drafts: [],
           localSyncEnabled: false
       }];
   });
@@ -122,6 +146,8 @@ function App() {
           }] : [],
           exhibits: [],
           notes: [],
+          templates: [],
+          drafts: [],
           localSyncEnabled: false
       };
 
@@ -168,28 +194,20 @@ function App() {
 
           try {
              // 1. Scan and Import Files from the selected directory
-             // We pass current docs to check for duplicates inside the service
              const importedDocs = await FileSystemService.importFilesFromDirectory(
                  dirHandle, 
                  activeCase.documents,
                  (status) => setImportStatus(status)
              );
              
-             // 2. Prepare merged state
-             // Combine existing docs with newly imported ones
              const mergedDocuments = [...activeCase.documents, ...importedDocs];
              
-             // 3. Update State (This sets the handle and enables sync)
-             // We pass documents here so they are set in the state before the first auto-sync fires
              updateActiveCase({ 
                  directoryHandle: dirHandle,
                  localSyncEnabled: true,
                  documents: mergedDocuments
              });
 
-             // 4. Perform initial write-back sync explicitly
-             // We do this to ensure metadata and existing notes/docs are written to the new folder immediately.
-             // We construct a temp object because the state update (step 3) is asynchronous.
              const tempCase = { 
                  ...activeCase, 
                  directoryHandle: dirHandle, 
@@ -198,11 +216,8 @@ function App() {
              };
              await FileSystemService.syncCaseToLocal(tempCase, dirHandle);
 
-             if (importedDocs.length > 0) {
-                 alert(`Successfully connected to "${dirHandle.name}". Imported ${importedDocs.length} new files.`);
-             } else {
-                 alert(`Connected to "${dirHandle.name}". No new compatible files found to import.`);
-             }
+             // SUCCESS: Auto-open the explorer
+             setExplorerState({ isOpen: true, mode: 'local' });
 
           } catch(e) {
              console.error(e);
@@ -210,6 +225,76 @@ function App() {
           } finally {
               setImportStatus(null);
           }
+      }
+  };
+  
+  const handleGoogleSignIn = (user: GoogleUser) => {
+      setGoogleUser(user);
+      // Auto-open explorer on successful sign-in
+      setExplorerState({ isOpen: true, mode: 'google' });
+  };
+
+  // --- Google Drive Sync Handler (Select Folder) ---
+  const handleConnectGoogleFolder = async () => {
+      if (!googleUser || !apiKey) {
+          alert("Please sign in with Google and ensure your API Key is set.");
+          return;
+      }
+      try {
+          const folder = await GoogleDriveService.pickFolder(googleUser.accessToken, apiKey);
+          updateActiveCase({ 
+              googleFolderId: folder.id,
+              googleFolderName: folder.name 
+          });
+          alert(`Linked case to Google Drive folder: ${folder.name}`);
+      } catch (e: any) {
+          if (e !== "Picker cancelled") {
+              console.error(e);
+              alert("Failed to select Google Drive folder.");
+          }
+      }
+  };
+
+  // --- Import from Explorer (Local & Google) ---
+  const handleExplorerImport = async (item: ExplorerItem) => {
+      try {
+          let content = "";
+          let type = "text/plain";
+          
+          if (explorerState.mode === 'local' && item.handle) {
+              // @ts-ignore
+              const file = await item.handle.getFile();
+              type = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
+              
+              if (type.includes('pdf')) {
+                  const res = await extractTextFromPdf(file);
+                  content = res.text;
+              } else {
+                  content = await file.text();
+              }
+          } else if (explorerState.mode === 'google' && googleUser) {
+              content = await GoogleDriveService.downloadFile(item.id, item.mimeType || 'text/plain', googleUser.accessToken);
+              type = item.mimeType || 'text/plain';
+          } else {
+              throw new Error("Invalid import source");
+          }
+
+          const newDoc: StoredDocument = {
+              id: Date.now().toString(),
+              name: item.name,
+              type: type,
+              content: content,
+              side: 'neutral',
+              dateAdded: new Date().toISOString()
+          };
+
+          updateActiveCase({ documents: [...activeCase.documents, newDoc] });
+          setExplorerState({ ...explorerState, isOpen: false });
+          alert(`Imported ${item.name}`);
+
+      } catch (e: any) {
+          console.error("Import failed", e);
+          alert("Import failed: " + e.message);
       }
   };
 
@@ -333,7 +418,14 @@ function App() {
         // Local Folder Props
         isLocalSyncEnabled={activeCase.localSyncEnabled}
         onConnectLocalFolder={handleConnectLocalFolder}
+        onOpenLocalExplorer={() => setExplorerState({ isOpen: true, mode: 'local' })}
         folderName={activeCase.directoryHandle?.name}
+        isIframe={isIframe}
+        // Google Drive Props
+        googleUser={googleUser}
+        onGoogleSignIn={handleGoogleSignIn}
+        onGoogleSignOut={() => setGoogleUser(undefined)}
+        onOpenGoogleExplorer={() => setExplorerState({ isOpen: true, mode: 'google' })}
       />
       
       {importStatus && (
@@ -348,7 +440,6 @@ function App() {
         <div className={cn(
             "h-full transition-all duration-300 absolute z-20 md:static bg-background border-r shadow-xl md:shadow-none",
             isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
-            // On desktop, we control width via the sidebar component props, on mobile we overlay
         )}>
              <CaseSidebar 
                 cases={cases}
@@ -358,6 +449,7 @@ function App() {
                 onCloseCase={closeCase}
                 isOpen={isSidebarOpen}
                 toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+                onConnectCloud={googleUser ? handleConnectGoogleFolder : undefined}
             />
         </div>
         
@@ -395,9 +487,14 @@ function App() {
                      </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    {activeCase.googleFolderId && (
+                        <span className="flex items-center gap-1 text-blue-600 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                            Synced to Cloud: {activeCase.googleFolderName}
+                        </span>
+                    )}
                     {activeCase.localSyncEnabled && (
                         <span className="flex items-center gap-1 text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                            Synced to: {activeCase.directoryHandle?.name}
+                            Synced to Local: {activeCase.directoryHandle?.name}
                         </span>
                     )}
                     <span className="hidden sm:inline">{activeCase.caseMeta.jurisdiction || "No jurisdiction"}</span>
@@ -412,6 +509,7 @@ function App() {
                     onClear={handleClear}
                     lang={lang}
                     apiKey={apiKey}
+                    googleUser={googleUser}
                 />
             </div>
         </div>
@@ -432,6 +530,15 @@ function App() {
          onClose={() => setIsCreateDialogOpen(false)}
          onCreate={handleCreateCase}
       />
+      
+      <FileExplorerModal 
+          isOpen={explorerState.isOpen}
+          onClose={() => setExplorerState({...explorerState, isOpen: false})}
+          mode={explorerState.mode}
+          rootHandle={activeCase.directoryHandle}
+          accessToken={googleUser?.accessToken}
+          onImport={handleExplorerImport}
+      />
 
       {/* AI Chatbot Overlay */}
       <ChatBot 
@@ -440,6 +547,13 @@ function App() {
         profile={activeCase.profile} 
         context={activeCase.report?.fullExtractedText || activeCase.input} 
         onUpdateEditor={(val) => updateActiveCase({ input: val })}
+        onUpdateDraft={(val) => {
+            const currentDraft = activeCase.drafts.find(d => d.id === activeCase.activeDraftId) || activeCase.drafts[0];
+            if(currentDraft) {
+                const updatedDrafts = activeCase.drafts.map(d => d.id === currentDraft.id ? {...d, content: val, updatedAt: new Date().toISOString()} : d);
+                updateActiveCase({ drafts: updatedDrafts });
+            }
+        }}
         caseContext={{
             id: activeCase.id,
             name: activeCase.name,
@@ -447,12 +561,14 @@ function App() {
             events: activeCase.events,
             refDate: activeCase.referenceDate
         }}
-        // Pass sync info to chatbot so it knows about the local folder
+        allDocuments={activeCase.documents.map(d => ({name: d.name, content: d.content}))}
+        templates={activeCase.templates}
         localSyncInfo={activeCase.localSyncEnabled ? { 
             folderName: activeCase.directoryHandle?.name,
             fileCount: activeCase.documents.length + activeCase.notes.length
         } : undefined}
         lang={lang}
+        googleUser={googleUser}
       />
     </div>
   );

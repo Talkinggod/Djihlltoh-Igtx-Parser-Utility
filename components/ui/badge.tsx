@@ -1,3 +1,4 @@
+
 import React from "react";
 import { cn } from "../../lib/utils";
 
@@ -15,7 +16,7 @@ export const Badge: React.FC<BadgeProps> = ({ className, variant = "default", ..
           "border-transparent bg-primary text-primary-foreground hover:bg-primary/90": variant === "default",
           "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80": variant === "secondary",
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80": variant === "destructive",
-          "text-foreground": variant === "outline",
+          "text-foreground border-border": variant === "outline",
           "border-transparent bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25": variant === "success",
           "border-transparent bg-amber-500/15 text-amber-500 hover:bg-amber-500/25": variant === "warning",
         },

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Plus, FolderOpen, X, Briefcase, Scale, Clock, FileText, AlertCircle } from 'lucide-react';
+import { Plus, FolderOpen, X, Briefcase, Scale, Clock, FileText, AlertCircle, Cloud } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { CaseState } from '../types';
@@ -13,10 +13,12 @@ interface CaseSidebarProps {
     onCloseCase: (id: string) => void;
     isOpen: boolean;
     toggleSidebar: () => void;
+    // New prop for cloud connect
+    onConnectCloud?: () => void;
 }
 
 export const CaseSidebar: React.FC<CaseSidebarProps> = ({ 
-    cases, activeCaseId, onSwitchCase, onCreateCase, onCloseCase, isOpen, toggleSidebar 
+    cases, activeCaseId, onSwitchCase, onCreateCase, onCloseCase, isOpen, toggleSidebar, onConnectCloud 
 }) => {
     
     // Sort cases by last active
@@ -46,6 +48,7 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                 {sortedCases.map(c => {
                     const isActive = c.id === activeCaseId;
                     const criticalEvents = c.events.filter(e => e.type === 'error' || e.type === 'deadline').length;
+                    const hasCloud = !!c.googleFolderId;
                     
                     return (
                         <div 
@@ -60,12 +63,17 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                             title={c.name}
                         >
                             <div className={cn(
-                                "w-9 h-9 rounded flex items-center justify-center shrink-0 border transition-colors",
+                                "w-9 h-9 rounded flex items-center justify-center shrink-0 border transition-colors relative",
                                 isActive 
                                     ? "bg-primary/10 border-primary/20 text-primary" 
                                     : "bg-muted border-muted-foreground/20 text-muted-foreground"
                             )}>
                                 {c.domain === 'legal' ? <Scale className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                                {hasCloud && (
+                                    <div className="absolute -bottom-1 -right-1 bg-background rounded-full border border-blue-200">
+                                        <Cloud className="w-3 h-3 text-blue-500 p-0.5" />
+                                    </div>
+                                )}
                             </div>
                             
                             {isOpen && (
@@ -96,7 +104,7 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                 })}
             </div>
 
-            <div className="p-3 border-t border-border/50 shrink-0">
+            <div className="p-3 border-t border-border/50 shrink-0 space-y-2">
                 <Button 
                     variant="outline" 
                     className={cn(
@@ -108,6 +116,21 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                     <Plus className="w-4 h-4" />
                     {isOpen && "New Case"}
                 </Button>
+                
+                {onConnectCloud && (
+                    <Button 
+                        variant="ghost" 
+                        className={cn(
+                            "w-full gap-2 text-xs text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10",
+                            !isOpen && "px-0 justify-center"
+                        )}
+                        onClick={onConnectCloud}
+                        title="Link Google Drive Folder"
+                    >
+                        <Cloud className="w-4 h-4" />
+                        {isOpen && "Link Cloud Drive"}
+                    </Button>
+                )}
             </div>
         </div>
     );

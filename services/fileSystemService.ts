@@ -1,5 +1,5 @@
 
-import { CaseState, StoredDocument, Note } from '../types';
+import { CaseState, StoredDocument, Note, ExplorerItem } from '../types';
 import { extractTextFromPdf } from './pdfExtractor';
 
 /**
@@ -49,8 +49,22 @@ export const FileSystemService = {
                 mode: 'readwrite'
             });
             return handle;
-        } catch (e) {
-            console.error("User cancelled or failed to pick directory", e);
+        } catch (e: any) {
+            // Check if user cancelled
+            if (e.name === 'AbortError') {
+                return null;
+            }
+
+            console.error("Directory picker error:", e);
+
+            // Handle cross-origin iframe restriction (common in development environments)
+            // Error usually matches: "Failed to execute 'showDirectoryPicker' on 'Window': Cross origin sub frames aren't allowed to show a file picker."
+            if (e.message && (e.message.includes('Cross origin sub frames') || e.message.includes('SecurityError'))) {
+                alert("BROWSER SECURITY RESTRICTION:\n\nLocal Drive access is blocked because this application is running inside a preview frame.\n\nSOLUTION: Please open this application in a New Tab (Full Window) to use Local Drive Sync.");
+            } else {
+                alert(`Failed to access local directory: ${e.message}`);
+            }
+            
             return null;
         }
     },
@@ -72,6 +86,26 @@ export const FileSystemService = {
             return true;
         }
         return false;
+    },
+
+    /**
+     * List all items in a directory handle for the File Explorer
+     */
+    getDirectoryContents: async (dirHandle: FileSystemDirectoryHandle): Promise<ExplorerItem[]> => {
+        const items: ExplorerItem[] = [];
+        // @ts-ignore
+        for await (const entry of dirHandle.values()) {
+            items.push({
+                id: entry.name,
+                name: entry.name,
+                kind: entry.kind,
+                handle: entry
+            });
+        }
+        return items.sort((a, b) => {
+            if (a.kind === b.kind) return a.name.localeCompare(b.name);
+            return a.kind === 'directory' ? -1 : 1;
+        });
     },
 
     /**

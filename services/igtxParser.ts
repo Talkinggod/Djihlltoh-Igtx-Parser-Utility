@@ -2,7 +2,7 @@
 import { franc } from 'franc';
 import { ExtractedBlock, ParseReport, ParserMetadata, Tier4Assessment, Tier4Signal, LanguageProfile, IGTXDocument, IGTXBlock, IGTXSource, PdfTextDiagnostics, StructuralAnalysis, ParserDomain, CaseMetadata, CaseType } from '../types';
 
-const IGTX_VERSION = "2.0.0-dual";
+const IGTX_VERSION = "2.1.0-polyglot";
 
 const COMMON_TRANSLATION_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
@@ -15,7 +15,10 @@ const COMMON_TRANSLATION_WORDS = new Set([
 const COMPLEX_ORTHO_REGEX = /[ąęįǫųłŁʼ’́ƛλχʕʔʷəščx̌q̓]/g;
 const HYPHEN_REGEX = /-/g;
 const APOSTROPHE_REGEX = /['ʼ]/g;
-const STRONG_NATIVE_CHAR_REGEX = /[\u00C0-\u024F\u1E00-\u1EFF\u0250-\u02AF\uA720-\uA7FF\u02C0-\u02FF\u207F!|‖ǂʔʕ’ʻ\u0300-\u036F]/;
+
+// Expanded to support: Latin Ext, IPA, Greek, Cyrillic, Hebrew, Arabic, Devanagari, CJK
+const STRONG_NATIVE_CHAR_REGEX = /[\u00C0-\u024F\u1E00-\u1EFF\u0250-\u02AF\uA720-\uA7FF\u02C0-\u02FF\u207F!|‖ǂʔʕ’ʻ\u0300-\u036F\u0370-\u03FF\u0400-\u04FF\u0590-\u05FF\u0600-\u06FF\u0900-\u097F\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]/;
+
 const MORPH_DENSE_MARKER_REGEX = /[’łŁįąęǫųńáéíóúʕʾʿ\u0323]/;
 const GLOSS_CHARS_REGEX = /[-=:\d\[\]<>]/g;
 const GLOSS_SEPARATOR_REGEX = /[=:]/;
@@ -37,9 +40,10 @@ const CLAUSE_BOUNDARY_REGEX = /[,;،؛:—|]/g;
 
 // --- Language Profile Mapping (ISO-639-3 -> Profile) ---
 const LANG_PROFILE_MAP: Record<string, LanguageProfile> = {
-    'zho': 'analytic', 'yue': 'analytic', 'vie': 'analytic', 
+    'zho': 'analytic', 'yue': 'analytic', 'vie': 'analytic', 'cmn': 'analytic',
     'ara': 'morphological_dense', 'heb': 'morphological_dense', 
-    'kal': 'polysynthetic', 'iku': 'polysynthetic'
+    'kal': 'polysynthetic', 'iku': 'polysynthetic',
+    'rus': 'morphological_dense', 'ukr': 'morphological_dense'
 };
 
 function cyrb53(str: string, seed = 0) {
@@ -291,6 +295,13 @@ function tier4Check(text: string, domain: ParserDomain, languageHint?: string, d
           totalScore += 0.40;
           signals.push({ feature: 'orthographic_complexity', weight: 0.40, description: `High density of complex graphemes (n=${orthoMatches})` });
       }
+      
+      // Basic check for non-Latin script density (indicates need for specialized parser)
+      const nonLatinMatch = text.match(/[^\u0000-\u007F]/g);
+      if (nonLatinMatch && nonLatinMatch.length / text.length > 0.3) {
+           totalScore += 0.30;
+           signals.push({ feature: 'orthographic_complexity', weight: 0.30, description: 'High density of non-Latin script' });
+      }
 
       const words = text.split(/\s+/).slice(0, 100);
       if (words.length > 0) {
@@ -307,7 +318,7 @@ function tier4Check(text: string, domain: ParserDomain, languageHint?: string, d
     requiresTier4: finalConfidence >= 0.40,
     confidence: finalConfidence,
     signals,
-    recommendedAction: domain === 'legal' ? "Activate Legal Pleading Parser" : "Switch profile to 'Polysynthetic'"
+    recommendedAction: domain === 'legal' ? "Activate Legal Pleading Parser" : "Switch profile to 'Polysynthetic' or appropriate script profile"
   };
 }
 

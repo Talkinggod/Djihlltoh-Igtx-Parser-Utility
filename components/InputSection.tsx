@@ -1,6 +1,6 @@
 
 import React, { useRef, useState } from 'react';
-import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel, Calendar } from 'lucide-react';
+import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel, Calendar, Database, Languages } from 'lucide-react';
 import { Card, CardHeader, CardFooter, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -8,8 +8,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { cn } from '../lib/utils';
 import { extractTextFromPdf } from '../services/pdfExtractor';
 import { scrapeUrlViaGemini } from '../services/webScraper';
+import { GoogleDriveService } from '../services/googleDriveService';
 import { PdfViewer } from './PdfViewer';
-import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain } from '../types';
+import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain, GoogleUser } from '../types';
 import { translations } from '../services/translations';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
 
@@ -28,11 +29,13 @@ interface InputSectionProps {
   setDocTypeId?: (id: string) => void;
   refDate?: Date;
   setRefDate?: (date: Date) => void;
+  // Google
+  googleUser?: GoogleUser;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ 
     input, setInput, onProcess, onClear, profile, setProfile, lang, apiKey, domain,
-    docTypeId, setDocTypeId, refDate, setRefDate
+    docTypeId, setDocTypeId, refDate, setRefDate, googleUser
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -45,6 +48,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
   const [loadingStatus, setLoadingStatus] = useState("Parsing PDF...");
   const [activeTab, setActiveTab] = useState<string>("input");
   const [showMetadata, setShowMetadata] = useState(false);
+  const [ocrLang, setOcrLang] = useState<string>('eng');
   
   // URL Input State
   const [urlInput, setUrlInput] = useState("");
@@ -75,7 +79,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
         setDragActive(false);
       }
     } else if (e.type === "dragover") {
-      // Prevent default to allow drop
+      e.preventDefault(); // Necessary to allow dropping
     }
   };
 
@@ -100,10 +104,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
     try {
       if (file.type === "application/pdf" || file.name.endsWith('.pdf')) {
         setPdfFile(file);
+        // Pass selected OCR Language
         const { text, diagnostics } = await extractTextFromPdf(file, (percent, status) => {
           setLoadingProgress(percent);
           if (status) setLoadingStatus(status);
-        });
+        }, ocrLang);
+        
         setInput(text);
         setPdfDiagnostics(diagnostics);
         setSourceMeta(prev => ({ ...prev, source_type: 'pdf', title: file.name }));
@@ -131,6 +137,36 @@ export const InputSection: React.FC<InputSectionProps> = ({
     } finally {
       setIsLoadingFile(false);
     }
+  };
+
+  const handleDriveImport = async () => {
+      if (!googleUser) return;
+      setIsLoadingFile(true);
+      setLoadingStatus("Connecting to Google Drive...");
+      try {
+          const file = await GoogleDriveService.openPicker(googleUser.accessToken, apiKey);
+          setLoadingStatus("Downloading file...");
+          const content = await GoogleDriveService.downloadFile(file.id, file.mimeType, googleUser.accessToken);
+          
+          setInput(content);
+          setFileName(file.name);
+          setSourceMeta(prev => ({ 
+              ...prev, 
+              source_type: 'google_drive', 
+              title: file.name,
+              source_url: `https://docs.google.com/document/d/${file.id}`
+          }));
+          setActiveTab("input");
+      } catch (e) {
+          console.error("Drive Import Failed", e);
+          if (typeof e === 'string' && e.includes("Picker cancelled")) {
+              // Ignore
+          } else {
+              alert("Failed to import from Google Drive. See console.");
+          }
+      } finally {
+          setIsLoadingFile(false);
+      }
   };
 
   const handleUrlFetch = async () => {
@@ -262,14 +298,37 @@ export const InputSection: React.FC<InputSectionProps> = ({
              )}
            </div>
            
-           {/* Profile Disclaimer */}
-           <div className="bg-primary/5 px-4 py-1.5 border-b border-primary/10 flex items-center gap-2 shrink-0">
-                <Info className="w-3 h-3 text-primary/70 shrink-0" />
-                <span className="text-[10px] text-primary/80 font-medium">
-                    {domain === 'legal' 
-                        ? "Legal Mode active: Optimized for finding captions, index numbers, and parties." 
-                        : t.profile_disclaimer}
-                </span>
+           {/* OCR Language Selector (For PDF Scans) */}
+           <div className="bg-secondary/5 px-4 py-1.5 border-b border-secondary/10 flex items-center justify-between shrink-0">
+               <div className="flex items-center gap-2">
+                    <Languages className="w-3 h-3 text-secondary-foreground/70 shrink-0" />
+                    <span className="text-[10px] text-muted-foreground font-medium">Doc Language (for Scans):</span>
+                    <select 
+                        className="h-6 text-[10px] bg-transparent border-none p-0 focus:ring-0 cursor-pointer text-foreground font-semibold"
+                        value={ocrLang}
+                        onChange={(e) => setOcrLang(e.target.value)}
+                    >
+                        <option value="eng">English</option>
+                        <option value="chi_sim">Chinese (Simplified)</option>
+                        <option value="chi_tra">Chinese (Traditional)</option>
+                        <option value="ara">Arabic</option>
+                        <option value="rus">Russian</option>
+                        <option value="spa">Spanish</option>
+                        <option value="fra">French</option>
+                        <option value="hin">Hindi</option>
+                        <option value="jpn">Japanese</option>
+                        <option value="kor">Korean</option>
+                    </select>
+               </div>
+               
+               <div className="flex items-center gap-2">
+                    <Info className="w-3 h-3 text-primary/70 shrink-0" />
+                    <span className="text-[10px] text-primary/80 font-medium">
+                        {domain === 'legal' 
+                            ? "Legal Mode active: Optimized for finding captions, index numbers, and parties." 
+                            : t.profile_disclaimer}
+                    </span>
+               </div>
            </div>
            
            {/* Legal Doc Type Selector Panel */}
@@ -324,26 +383,46 @@ export const InputSection: React.FC<InputSectionProps> = ({
                 <div className="relative w-full h-full group">
                   <textarea
                     className={cn(
-                      "w-full h-full bg-transparent p-6 text-sm font-mono text-foreground resize-none focus:outline-none leading-relaxed placeholder:text-muted-foreground/50 whitespace-pre overflow-auto custom-scrollbar",
+                      "w-full h-full bg-transparent p-6 text-sm font-mono text-foreground resize-none focus:outline-none leading-relaxed placeholder:text-muted-foreground/50 whitespace-pre-wrap overflow-auto custom-scrollbar",
                       (isLoadingFile || isScraping) && "opacity-50"
                     )}
                     placeholder={isLoadingFile ? "Reading file..." : (isScraping ? "Fetching content..." : (domain === 'legal' ? "// Paste Affidavit, Brief, or Complaint here..." : "// Paste your raw IGT text here..."))}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                        // Normalize line endings to LF for consistent processing across OS (Windows/Linux/Mac)
+                        const normalized = e.target.value.replace(/\r\n/g, "\n");
+                        setInput(normalized);
+                    }}
                     spellCheck={false}
                     disabled={isLoadingFile || isScraping}
                     dir="ltr" 
                   />
+                  
+                  {/* Drag and Drop Overlay */}
+                  {dragActive && (
+                    <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm border-2 border-dashed border-primary m-4 rounded-xl flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+                        <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                            <Upload className="w-10 h-10 text-primary" />
+                        </div>
+                        <h3 className="text-xl font-bold text-foreground">Drop file to ingest</h3>
+                        <p className="text-sm text-muted-foreground mt-2">Supports PDF, TXT, MD, IGT</p>
+                    </div>
+                  )}
+
+                  {/* Loading Overlay */}
                   {(isLoadingFile || isScraping) && (
                     <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center z-10 m-2 rounded-lg">
                        <Loader2 className="w-8 h-8 text-primary mb-2 animate-spin" />
                        <p className="text-primary font-medium text-sm animate-pulse">{loadingStatus}</p>
                        {isLoadingFile && (
-                           <div className="w-48 h-1.5 bg-muted mt-3 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-primary transition-all duration-300 ease-out" 
-                                style={{ width: `${loadingProgress}%` }}
-                              />
+                           <div className="flex flex-col items-center gap-1 mt-3">
+                               <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-primary transition-all duration-300 ease-out" 
+                                    style={{ width: `${loadingProgress}%` }}
+                                  />
+                               </div>
+                               <span className="text-xs text-muted-foreground font-mono">{loadingProgress}%</span>
                            </div>
                        )}
                     </div>
@@ -413,6 +492,19 @@ export const InputSection: React.FC<InputSectionProps> = ({
             onChange={(e) => e.target.files && handleFile(e.target.files[0])}
             accept=".txt,.md,.igt,.pdf,application/pdf,text/plain" 
           />
+          
+          {/* Drive Import Button */}
+          {googleUser && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleDriveImport}
+                disabled={isLoadingFile || isScraping}
+                title="Import from Google Drive"
+              >
+                <Database className="w-3.5 h-3.5" />
+              </Button>
+          )}
           
           {fileName && (
             <Badge variant="secondary" className="gap-1.5 font-normal">
