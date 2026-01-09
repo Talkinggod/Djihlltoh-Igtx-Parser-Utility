@@ -20,6 +20,69 @@ export interface GoogleUser {
     accessToken: string;
 }
 
+// --- LegalBench Types ---
+export type LegalBenchTaskType = 
+    | 'hearsay' 
+    | 'contract_nli' 
+    | 'abercrombie' 
+    | 'rule_application' 
+    | 'case_hold' 
+    | 'proa' 
+    | 'cuad_extraction' 
+    | 'citation_retrieval'
+    | 'unfair_tos'
+    | 'ledgar_classification'
+    | 'spa_extraction';
+
+export interface LegalBenchResult {
+    task: LegalBenchTaskType;
+    conclusion: string; // e.g. "Hearsay", "Entailment", "Suggestive"
+    reasoning: string;
+    confidence: number;
+    citations?: string[]; // Referenced rules/cases
+    // For CUAD/Retrieval/Extraction
+    extracted_clauses?: { type: string; text: string }[];
+}
+
+// --- Anomaly Detection Types ---
+export interface ExtractedDate {
+  date: Date;
+  text: string;
+  context: string;
+  type: 'jurat' | 'filing' | 'signature' | 'reference' | 'service' | 'hearing';
+  location: { start: number; end: number };
+}
+
+export interface Violation {
+  constraintId: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  description: string;
+  dates: ExtractedDate[];
+}
+
+export interface DocumentReference {
+  text: string;
+  year?: number;
+  documentType?: string;
+  location: { start: number; end: number };
+}
+
+export interface Signature {
+  party: string;
+  date?: Date;
+  location: { start: number; end: number };
+}
+
+export interface LegalAnalysisResult {
+  documentId: string;
+  dates: ExtractedDate[];
+  references: DocumentReference[];
+  signatures: Signature[];
+  violations: Violation[];
+  criticalCount: number;
+  timestamp: Date;
+}
+
 // --- Intelligent Document Type System ---
 
 export type PriorityLevel = 'critical' | 'high' | 'medium' | 'low';
@@ -135,6 +198,44 @@ export interface FoundationalDocument {
     description?: string;
 }
 
+// --- CONTRACT AWARENESS TYPES ---
+
+export type ContractComponent = 
+    | 'preamble' 
+    | 'recitals' 
+    | 'definitions' 
+    | 'operative_clause' 
+    | 'rep_warranty' 
+    | 'boilerplate' 
+    | 'signature_block'
+    | 'other';
+
+export type CoreElement = 'offer' | 'acceptance' | 'consideration' | 'capacity' | 'legality' | null;
+
+export interface ContractRisk {
+    severity: 'critical' | 'high' | 'moderate' | 'low';
+    category: 'ambiguity' | 'compliance' | 'financial' | 'liability' | 'termination' | 'vulnerability';
+    impact: 'adverse' | 'favorable' | 'neutral'; // adverse (Red), favorable (Green), neutral (Amber)
+    description: string;
+    mitigation?: string;
+}
+
+export interface ContractObligation {
+    actor: string; // The party responsible
+    action: string; // What they must do
+    deadline?: string; // When they must do it
+    condition?: string; // "If X happens..."
+}
+
+export interface ContractAnalysis {
+    component_type: ContractComponent;
+    core_element: CoreElement;
+    risks: ContractRisk[];
+    obligations: ContractObligation[];
+    statutory_conflict?: string; // e.g. "Conflicts with UCC 2-207"
+    missing_elements?: string[]; // e.g. "Missing definition for X"
+}
+
 // Legal State
 export interface LegalState {
   provenance?: {
@@ -150,7 +251,9 @@ export interface LegalState {
   };
   legal_points: string[];
   foundational_docs: FoundationalDocument[];
-  logic_trace?: string[]; // For "If/Then" logic output and warnings
+  logic_trace?: string[]; 
+  // NEW: Contract Specific Logic
+  contract_analysis?: ContractAnalysis;
 }
 
 export interface ExtractedBlock {
@@ -288,6 +391,17 @@ export interface Note {
     history: { timestamp: string, content: string }[];
 }
 
+// --- Advanced Tagging System ---
+export type TagCategory = 'temporal' | 'implication' | 'relevance' | 'outcome';
+
+export interface EvidenceTag {
+    id: string;
+    category: TagCategory;
+    label: string; // e.g., "Breach of Contract", "Pre-Incident", "Damages Proof"
+    confidence: number; // 0.0 to 1.0 (AI confidence)
+    description?: string; // AI explanation of why this tag applies
+}
+
 export interface StoredDocument {
     id: string;
     name: string;
@@ -295,14 +409,20 @@ export interface StoredDocument {
     type: string; // PDF, txt
     side: 'plaintiff' | 'defendant' | 'court' | 'neutral';
     dateAdded: string;
+    // New: Semantic Tagging
+    tags?: EvidenceTag[];
+    markedAsExhibit?: string; // ID of the exhibit if marked
 }
 
-export interface StoredExhibit {
-    id: string;
-    label: string; // e.g., "Exhibit A"
-    description: string;
-    content: string;
-    dateAdded: string;
+export type ExhibitStatus = 'potential' | 'marked' | 'offered' | 'admitted' | 'excluded';
+
+export interface TrialExhibit {
+    id: string; // Internal UUID
+    designation: string; // The legal mark: "Exhibit A", "PX-1", "DX-A"
+    description: string; // "Lease Agreement dated 2024"
+    sourceDocumentId?: string; // Link to StoredDocument
+    status: ExhibitStatus;
+    markedDate: string;
 }
 
 export type CaseType = 'LT' | 'Civil' | 'Federal' | 'Small Claims' | 'Other';
@@ -313,6 +433,27 @@ export interface CaseMetadata {
     plaintiffs: string[];
     defendants: string[];
     indexNumber: string;
+}
+
+// NEW: Case Viability / Balance of Equities
+export interface ViabilityFactor {
+    category: string; // Loose string to allow "Experience Sourced" custom factors
+    score: number; // 0-100
+    rationale: string;
+    key_strengths: string[];
+    key_weaknesses: string[];
+}
+
+export interface ViabilityAssessment {
+    overall_probability: number; // 0-100
+    factors: ViabilityFactor[];
+    executive_summary: string;
+    balance_of_equities: {
+        plaintiff_equities: string[];
+        defendant_equities: string[];
+        conclusion: string;
+    };
+    generated_at: string;
 }
 
 // NEW: Drafting & Templates
@@ -387,8 +528,11 @@ export interface CaseState {
 
     // Repositories
     documents: StoredDocument[];
-    exhibits: StoredExhibit[];
+    exhibits: TrialExhibit[];
     notes: Note[];
+
+    // NEW: Strategic Assessment
+    viabilityAssessment?: ViabilityAssessment;
 
     // NEW: Drafting
     templates: Template[];

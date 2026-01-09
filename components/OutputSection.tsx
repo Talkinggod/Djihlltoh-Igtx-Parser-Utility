@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParseReport, ParserDomain } from '../types';
 import { generateExportContent, ExportFormat } from '../services/exportService';
 import { enrichReportWithSemantics } from '../services/aiService';
-import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink, GitBranch } from 'lucide-react';
+import { Copy, Check, Download, AlertTriangle, Info, AlignLeft, ShieldAlert, FileJson, FileText, FileSpreadsheet, ChevronDown, FileCode, Database, Code2, Network, Braces, Cpu, Sparkles, BrainCircuit, Gavel, FileCheck, Scale, Loader2, FileWarning, Search, ExternalLink, GitBranch, AlertCircle, Bookmark, ClipboardCheck, Siren, Bomb, Star, Shield, Flag } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
@@ -258,12 +258,12 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                          </div>
                          <div className="flex-1 pt-1">
                             <h4 className="text-sm font-semibold flex items-center gap-2">
-                                Stage 2: {domain === 'legal' ? "Entity Extraction" : "Semantic State"}
+                                Stage 2: {domain === 'legal' ? "Legal Analysis" : "Semantic State"}
                                 {isStage2Complete && <Badge variant="outline" className="text-[10px] text-purple-500 border-purple-500/30">ENRICHED</Badge>}
                             </h4>
                             <p className="text-xs text-muted-foreground mb-3">
                                 {isStage2Complete 
-                                  ? `AI has extracted ${domain === 'legal' ? "parties and legal points" : "predicates and arguments"}.` 
+                                  ? `AI has analyzed ${domain === 'legal' ? "risks, obligations, and parties" : "predicates and arguments"}.` 
                                   : "Ready to extract metadata via Gemini."}
                             </p>
                             
@@ -276,7 +276,7 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                                     disabled={!onUpdateReport}
                                 >
                                     <Sparkles className="w-3.5 h-3.5" />
-                                    {domain === 'legal' ? "Extract Parties" : "Enrich (AI)"}
+                                    {domain === 'legal' ? "Analyze Contract" : "Enrich (AI)"}
                                 </Button>
                             )}
 
@@ -302,14 +302,36 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                  <AlignLeft className="w-4 h-4" /> Extraction Log
                </h4>
                <div className="space-y-3">
-                  {report.blocks.map((block) => (
-                    <div key={block.id} className="p-4 bg-card rounded-lg border border-border hover:border-primary/50 transition-colors group">
+                  {report.blocks.map((block) => {
+                    const analysis = block.legal_state?.contract_analysis;
+                    const hasHighRisk = analysis?.risks?.some(r => r.severity === 'critical' || r.severity === 'high');
+                    const hasFavorable = analysis?.risks?.some(r => r.impact === 'favorable');
+                    const isOperative = analysis?.component_type === 'operative_clause';
+                    
+                    return (
+                    <div key={block.id} className={cn(
+                        "p-4 bg-card rounded-lg border transition-colors group relative overflow-hidden",
+                        hasHighRisk ? "border-red-500/30 bg-red-500/5" : (hasFavorable ? "border-emerald-500/30 bg-emerald-500/5" : "border-border hover:border-primary/50")
+                    )}>
+                       {hasHighRisk && <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-bl-lg" />}
+                       {hasFavorable && !hasHighRisk && <div className="absolute top-0 right-0 w-2 h-2 bg-emerald-500 rounded-bl-lg" />}
+                       
                        <div className="flex justify-between items-start mb-3">
                           <div className="flex items-center gap-2">
                               <Badge variant="outline" className="font-mono text-[10px] text-muted-foreground">Ln {block.lineNumber}</Badge>
                               {(block.semantic_state?.provenance || block.legal_state?.provenance) && (
                                   <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-600 bg-purple-500/5 gap-1">
                                       <BrainCircuit className="w-3 h-3" /> AI
+                                  </Badge>
+                              )}
+                              {analysis?.core_element && (
+                                  <Badge variant="default" className="text-[10px] bg-indigo-600 hover:bg-indigo-700 font-bold uppercase tracking-wider">
+                                      {analysis.core_element}
+                                  </Badge>
+                              )}
+                              {analysis?.component_type && analysis.component_type !== 'other' && (
+                                  <Badge variant="secondary" className="text-[10px] uppercase">
+                                      {analysis.component_type.replace('_', ' ')}
                                   </Badge>
                               )}
                           </div>
@@ -320,128 +342,92 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
                          {block.extractedLanguageLine}
                        </div>
 
-                       {/* NEW: Structure Analysis Visualization */}
-                       {block.structural && (
-                            <div className="flex items-center gap-2 mt-2">
-                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-normal flex items-center gap-1">
-                                    <GitBranch className="w-3 h-3" />
-                                    {block.structural.clauseType.replace('_', ' ')}
-                                </Badge>
-                                <span className="text-[9px] text-muted-foreground">
-                                    Complexity: <span className="font-mono">{block.structural.complexityScore}</span>
-                                </span>
-                            </div>
-                       )}
+                       {/* NEW: Contract Analysis Visualization */}
+                       {analysis && (
+                           <div className="space-y-3 mt-3">
+                                {/* Risk Register */}
+                                {analysis.risks && analysis.risks.length > 0 && (
+                                    <div className="flex flex-col gap-2">
+                                        {analysis.risks.map((risk, i) => {
+                                            // Determination Logic for Visuals
+                                            const isAdverse = risk.impact === 'adverse';
+                                            const isFavorable = risk.impact === 'favorable';
+                                            const isCritical = risk.severity === 'critical';
+                                            const isHigh = risk.severity === 'high';
 
-                        {/* Semantic State Display (Linguistic) */}
-                        {block.semantic_state?.predicate && domain === 'linguistic' && (
-                            <div className="mt-3 bg-muted/30 p-2 rounded text-xs font-mono border border-border/50">
-                                <div className="grid grid-cols-[60px_1fr] gap-1">
-                                    <span className="text-muted-foreground">PRED:</span>
-                                    <span className="text-foreground font-semibold">{block.semantic_state.predicate}</span>
-                                    <span className="text-muted-foreground">ARGS:</span>
-                                    <span className="text-muted-foreground">[{block.semantic_state.arguments?.join(', ')}]</span>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Legal State Display */}
-                        {block.legal_state && domain === 'legal' && (
-                             <div className="space-y-3 mt-3">
-                                {/* Basic Metadata (Parties, Index) */}
-                                {(block.legal_state.case_meta.index_number || block.legal_state.parties.length > 0) && (
-                                    <div className="bg-muted/30 p-2 rounded text-xs font-mono border border-border/50 space-y-2">
-                                        {block.legal_state.case_meta.index_number && (
-                                            <div className="flex items-center gap-2 text-emerald-600">
-                                                <FileCheck className="w-3 h-3" />
-                                                <span className="font-semibold">INDEX: {block.legal_state.case_meta.index_number}</span>
-                                            </div>
-                                        )}
-                                        {block.legal_state.parties.length > 0 && (
-                                            <div className="flex flex-wrap gap-1">
-                                                {block.legal_state.parties.map((p, i) => (
-                                                    <Badge key={i} variant="outline" className="text-[9px] bg-background border-primary/20">
-                                                        {p.role.toUpperCase()}: {p.name}
-                                                    </Badge>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Foundational Documents Tracking */}
-                                {block.legal_state.foundational_docs && block.legal_state.foundational_docs.length > 0 && (
-                                    <div className="grid gap-2">
-                                        {block.legal_state.foundational_docs.map((doc, idx) => {
-                                            const isMissing = doc.status === 'missing' || doc.status === 'unavailable';
-                                            const isCheckedIn = doc.status === 'checked_in';
                                             return (
-                                                <div 
-                                                    key={idx} 
-                                                    className={cn(
-                                                        "p-3 rounded-md border flex flex-col gap-2 transition-colors",
-                                                        isMissing 
-                                                            ? "bg-amber-500/10 border-amber-500/50" 
-                                                            : "bg-emerald-500/5 border-emerald-500/20"
-                                                    )}
-                                                >
-                                                    <div className="flex justify-between items-start">
-                                                        <div className="flex items-center gap-2">
-                                                            {isMissing 
-                                                                ? <FileWarning className="w-4 h-4 text-amber-500" /> 
-                                                                : (doc.category === 'statute' || doc.category === 'case_law' ? <Scale className="w-4 h-4 text-emerald-600" /> : <FileCheck className="w-4 h-4 text-emerald-600" />)
-                                                            }
-                                                            <span className={cn("text-xs font-bold", isMissing ? "text-amber-600" : "text-emerald-700")}>
-                                                                {doc.name}
-                                                            </span>
-                                                        </div>
-                                                        <Badge variant="outline" className={cn("text-[9px] uppercase", 
-                                                            isMissing ? "border-amber-500/40 text-amber-600" : "border-emerald-500/40 text-emerald-600"
-                                                        )}>
-                                                            {doc.status.replace('_', ' ')}
-                                                        </Badge>
+                                                <div key={i} className={cn(
+                                                    "p-2 rounded text-xs flex items-start gap-2 border shadow-sm",
+                                                    // Critical + Adverse = Red Bomb (Explosive)
+                                                    isCritical && isAdverse ? "bg-red-100 dark:bg-red-900/20 border-red-500/50 text-red-700 dark:text-red-400" :
+                                                    // Critical + Favorable = Green Star (Strategic Win)
+                                                    isCritical && isFavorable ? "bg-emerald-100 dark:bg-emerald-900/20 border-emerald-500/50 text-emerald-700 dark:text-emerald-400" :
+                                                    // High Adverse = Red Alert
+                                                    isHigh && isAdverse ? "bg-red-50 dark:bg-red-900/10 border-red-200 text-red-600" :
+                                                    // High Favorable = Green Shield
+                                                    isHigh && isFavorable ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 text-emerald-600" :
+                                                    // Default Warning
+                                                    "bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-500"
+                                                )}>
+                                                    <div className="shrink-0 mt-0.5">
+                                                        {isCritical && isAdverse ? <Bomb className="w-4 h-4 fill-red-500/20 animate-pulse" /> : 
+                                                         isCritical && isFavorable ? <Star className="w-4 h-4 fill-emerald-500/20" /> :
+                                                         isHigh && isAdverse ? <Siren className="w-4 h-4" /> :
+                                                         isHigh && isFavorable ? <Shield className="w-4 h-4" /> :
+                                                         <AlertTriangle className="w-4 h-4" />}
                                                     </div>
-                                                    
-                                                    <div className="text-[10px] text-muted-foreground flex justify-between items-end">
-                                                        <span>{doc.context}</span>
-                                                        
-                                                        <Button 
-                                                            size="sm" 
-                                                            variant="ghost" 
-                                                            className="h-6 gap-1 text-[9px] px-2 hover:bg-background/50"
-                                                            onClick={() => handleCitationLookup(doc.name)}
-                                                        >
-                                                            <Search className="w-3 h-3" />
-                                                            Lookup
-                                                        </Button>
+                                                    <div>
+                                                        <div className="font-bold uppercase text-[10px] flex items-center gap-2">
+                                                            {risk.category} • {risk.severity} {isFavorable ? 'Advantage' : 'Risk'}
+                                                        </div>
+                                                        <div className="mt-0.5">{risk.description}</div>
+                                                        {risk.mitigation && <div className="mt-1 text-[10px] opacity-80 italic">Tip: {risk.mitigation}</div>}
                                                     </div>
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 )}
-                                
-                                {/* Logic Trace / Warnings */}
-                                {block.legal_state.logic_trace && block.legal_state.logic_trace.length > 0 && (
-                                    <div className="bg-red-500/5 border border-red-500/20 p-2 rounded text-xs text-red-600/80 flex gap-2 items-start">
-                                        <ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                                        <ul className="list-disc pl-3">
-                                            {block.legal_state.logic_trace.map((trace, ti) => (
-                                                <li key={ti}>{trace}</li>
+
+                                {/* Obligations */}
+                                {analysis.obligations && analysis.obligations.length > 0 && (
+                                    <div className="bg-blue-500/5 border border-blue-500/20 p-2 rounded">
+                                        <div className="text-[10px] font-bold text-blue-600 mb-1 flex items-center gap-1">
+                                            <ClipboardCheck className="w-3 h-3" /> OBLIGATIONS
+                                        </div>
+                                        <ul className="space-y-1">
+                                            {analysis.obligations.map((obs, i) => (
+                                                <li key={i} className="text-xs text-foreground/80 flex gap-1">
+                                                    <span className="font-semibold text-blue-700">{obs.actor}:</span>
+                                                    <span>{obs.action}</span>
+                                                    {obs.deadline && <Badge variant="outline" className="text-[8px] h-4 ml-1">{obs.deadline}</Badge>}
+                                                </li>
                                             ))}
                                         </ul>
                                     </div>
                                 )}
 
-                                {block.legal_state.legal_points.length > 0 && (
-                                    <ul className="list-disc pl-4 text-xs text-muted-foreground">
-                                        {block.legal_state.legal_points.map((pt, i) => <li key={i}>{pt}</li>)}
-                                    </ul>
+                                {/* Statutory Conflicts */}
+                                {analysis.statutory_conflict && (
+                                    <div className="flex items-center gap-2 text-xs text-destructive font-semibold bg-destructive/5 p-2 rounded border border-destructive/20">
+                                        <Gavel className="w-3 h-3" />
+                                        CONFLICT: {analysis.statutory_conflict}
+                                    </div>
                                 )}
-                             </div>
-                        )}
+                           </div>
+                       )}
+
+                       {/* Structure Analysis */}
+                       {block.structural && (
+                            <div className="flex items-center gap-2 mt-2 opacity-50 hover:opacity-100 transition-opacity">
+                                <Badge variant="outline" className="text-[9px] h-4 px-1 font-normal flex items-center gap-1 border-none text-muted-foreground">
+                                    <GitBranch className="w-3 h-3" />
+                                    {block.structural.clauseType.replace('_', ' ')}
+                                </Badge>
+                            </div>
+                       )}
                     </div>
-                  ))}
+                  )})}
                </div>
              </div>
           </TabsContent>

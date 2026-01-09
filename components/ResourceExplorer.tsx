@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutGrid, List as ListIcon, Search, Eye, FileText, Image, StickyNote, Calendar, Tag, Trash2, Download, ExternalLink, X, File, FileType, Clock } from 'lucide-react';
+import { LayoutGrid, List as ListIcon, Search, Eye, FileText, Image, StickyNote, Calendar, Tag, Trash2, Download, ExternalLink, X, File, FileType, Clock, Gavel, Scale, AlertTriangle, Lightbulb } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { PdfViewer } from './PdfViewer';
+import { EvidenceTag } from '../types';
 
 export interface ResourceItem {
     id: string;
@@ -14,6 +15,7 @@ export interface ResourceItem {
     type: 'pdf' | 'text' | 'image' | 'note' | 'exhibit';
     content?: string; // Text content for preview
     tags?: string[];
+    evidenceTags?: EvidenceTag[]; // NEW: Rich Semantic Tags
     rawFile?: File; // Optional raw file for PDF viewer/Images
     onDelete?: () => void;
     onAction?: () => void; // Primary action (e.g. Analyze)
@@ -131,7 +133,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
             case 'pdf': return <FileText className="w-full h-full text-red-500" />;
             case 'image': return <Image className="w-full h-full text-purple-500" />;
             case 'note': return <StickyNote className="w-full h-full text-yellow-500" />;
-            case 'exhibit': return <File className="w-full h-full text-blue-500" />;
+            case 'exhibit': return <Scale className="w-full h-full text-blue-500" />;
             default: return <FileText className="w-full h-full text-gray-500" />;
         }
     };
@@ -278,7 +280,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                             className={cn(
                                 "group cursor-default transition-all duration-200 select-none",
                                 viewMode === 'grid' 
-                                    ? "flex flex-col items-center gap-3 p-4 rounded-xl border-2 hover:bg-muted/50"
+                                    ? "flex flex-col items-center gap-3 p-4 rounded-xl border-2 hover:bg-muted/50 relative"
                                     : "flex items-center gap-4 p-2 rounded-lg border-b border-transparent hover:bg-muted/50 px-4",
                                 selectedIndex === idx 
                                     ? "bg-blue-500/10 border-blue-500 ring-0 ring-offset-0 z-10" 
@@ -287,10 +289,17 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                         >
                             {/* Icon / Thumbnail */}
                             <div className={cn(
-                                "shrink-0 flex items-center justify-center shadow-sm bg-background rounded-lg border",
+                                "shrink-0 flex items-center justify-center shadow-sm bg-background rounded-lg border relative",
                                 viewMode === 'grid' ? "w-20 h-24 p-4" : "w-10 h-10 p-2"
                             )}>
                                 {getIcon(item.type)}
+                                {item.evidenceTags && item.evidenceTags.length > 0 && (
+                                    <div className="absolute -top-1 -right-1 flex">
+                                        <div className="bg-amber-500 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full shadow-sm ring-1 ring-background">
+                                            {item.evidenceTags.length}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Metadata */}
@@ -303,7 +312,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                     )}>
                                         {item.title}
                                     </span>
-                                    <div className="flex items-center gap-2 mt-1">
+                                    <div className="flex items-center gap-2 mt-1 justify-center flex-wrap">
                                         {item.subtitle && (
                                             <span className="text-[10px] text-muted-foreground uppercase tracking-wider bg-muted px-1.5 rounded-sm">
                                                 {item.subtitle}
@@ -316,12 +325,35 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                             </span>
                                         )}
                                     </div>
+                                    {/* Evidence Tags Display in Grid */}
+                                    {viewMode === 'grid' && item.evidenceTags && item.evidenceTags.length > 0 && (
+                                        <div className="flex flex-wrap justify-center gap-1 mt-1">
+                                            {item.evidenceTags.slice(0, 2).map((tag, i) => (
+                                                <Badge key={i} variant="outline" className={cn(
+                                                    "text-[8px] px-1 h-3.5 border-opacity-50",
+                                                    tag.category === 'outcome' ? "border-green-500 text-green-600 bg-green-500/5" : 
+                                                    tag.category === 'implication' ? "border-amber-500 text-amber-600 bg-amber-500/5" :
+                                                    "border-blue-500 text-blue-600 bg-blue-500/5"
+                                                )}>
+                                                    {tag.label}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* List View Columns */}
                                 {viewMode === 'list' && (
                                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                                         <div className="flex gap-1">
+                                            {item.evidenceTags?.map((tag, i) => (
+                                                <Badge key={`ev-${i}`} variant="outline" className={cn(
+                                                    "text-[9px] h-5 px-1.5",
+                                                    tag.category === 'outcome' ? "border-green-500 text-green-600" : "border-primary/30"
+                                                )}>
+                                                    {tag.label}
+                                                </Badge>
+                                            ))}
                                             {item.tags?.map(tag => (
                                                 <Badge key={tag} variant="outline" className="text-[9px] h-5">{tag}</Badge>
                                             ))}
@@ -400,8 +432,13 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
 
                         {/* Footer / Meta */}
                         <div className="h-10 border-t bg-muted/10 flex items-center justify-between px-4 text-xs text-muted-foreground">
-                            <div className="flex gap-2">
-                                {selectedItem.tags?.map(t => <Badge key={t} variant="secondary" className="h-5 px-1.5 text-[10px]">{t}</Badge>)}
+                            <div className="flex gap-2 items-center">
+                                {selectedItem.evidenceTags && selectedItem.evidenceTags.map((t, i) => (
+                                    <Badge key={i} variant="secondary" className="h-5 px-1.5 text-[10px] bg-primary/10 text-primary border-primary/20" title={t.description}>
+                                        {t.label}
+                                    </Badge>
+                                ))}
+                                {selectedItem.tags?.map(t => <Badge key={t} variant="outline" className="h-5 px-1.5 text-[10px]">{t}</Badge>)}
                             </div>
                             <span className="font-mono opacity-50">Press Arrows to Navigate • Space to Close</span>
                         </div>

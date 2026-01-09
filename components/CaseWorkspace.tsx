@@ -1,17 +1,20 @@
 
 import React, { useState, useEffect } from 'react';
-import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser } from '../types';
+import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment } from '../types';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { InputSection } from './InputSection';
 import { OutputSection } from './OutputSection';
 import { ResourceExplorer, ResourceItem } from './ResourceExplorer';
-import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database } from 'lucide-react';
+import { ViabilityDashboard } from './ViabilityDashboard';
+import { LegalBenchTools } from './LegalBenchTools';
+import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { extractTextFromPdf } from '../services/pdfExtractor';
 import { GoogleDriveService } from '../services/googleDriveService';
 import { ResizableSplitView } from './ui/ResizableSplitView';
+import { generateViabilityAssessment } from '../services/aiService';
 
 interface CaseWorkspaceProps {
     caseData: CaseState;
@@ -28,8 +31,9 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     caseData, updateCase, onProcess, onClear, lang, apiKey, googleUser 
 }) => {
     const [activeTab, setActiveTab] = useState("analysis");
+    const [strategySubTab, setStrategySubTab] = useState<'viability' | 'legalbench'>('viability');
     const [docFilter, setDocFilter] = useState<string>('all');
-    const [newNote, setNewNote] = useState("");
+    const [isAssessing, setIsAssessing] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const templateInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -151,6 +155,28 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         updateCase({ drafts: updatedDrafts });
     };
 
+    // --- Viability Assessment Logic ---
+    const handleRunAssessment = async () => {
+        if (caseData.documents.length === 0 && !caseData.input) {
+            alert("Please add documents to the case before running an assessment.");
+            return;
+        }
+        if (!apiKey) {
+            alert("API Key required.");
+            return;
+        }
+
+        setIsAssessing(true);
+        try {
+            const assessment = await generateViabilityAssessment(caseData, apiKey);
+            updateCase({ viabilityAssessment: assessment });
+        } catch (e: any) {
+            alert("Assessment failed: " + e.message);
+        } finally {
+            setIsAssessing(false);
+        }
+    };
+
     // --- Notes Logic ---
     const handleAddNote = () => {
         const note: Note = {
@@ -174,6 +200,13 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         updateCase({ documents: caseData.documents.filter(d => d.id !== id) });
     };
 
+    // --- Exhibit Logic ---
+    const updateExhibitStatus = (exhibitId: string, status: ExhibitStatus) => {
+        updateCase({
+            exhibits: caseData.exhibits.map(ex => ex.id === exhibitId ? { ...ex, status } : ex)
+        });
+    };
+
     // --- Resource Mappers ---
 
     const documentResources: ResourceItem[] = caseData.documents
@@ -186,6 +219,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
             type: doc.type.includes('pdf') ? 'pdf' : 'text',
             content: doc.content,
             tags: [doc.type.split('/')[1] || 'doc'],
+            evidenceTags: doc.tags, // Pass advanced tags
             onAction: () => loadDocumentToAnalysis(doc),
             actionLabel: "Analyze",
             onDelete: () => deleteDocument(doc.id)
@@ -215,12 +249,15 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                         <TabsTrigger value="drafting" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
                             <PenTool className="w-4 h-4" /> <span className="hidden sm:inline">Drafting</span>
                         </TabsTrigger>
+                        <TabsTrigger value="strategy" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                            <TrendingUp className="w-4 h-4" /> <span className="hidden sm:inline">Strategy</span>
+                        </TabsTrigger>
                         <TabsTrigger value="documents" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
                             <Files className="w-4 h-4" /> <span className="hidden sm:inline">Documents</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.documents.length}</Badge>
                         </TabsTrigger>
                         <TabsTrigger value="exhibits" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <Image className="w-4 h-4" /> <span className="hidden sm:inline">Exhibits</span>
+                            <Gavel className="w-4 h-4" /> <span className="hidden sm:inline">Exhibits</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.exhibits.length}</Badge>
                         </TabsTrigger>
                         <TabsTrigger value="notes" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
@@ -375,7 +412,66 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                     </div>
                 )}
 
-                {/* 3. DOCUMENTS TAB (Using ResourceExplorer) */}
+                {/* 3. STRATEGY TAB (New Viability Dashboard + LegalBench Tools) */}
+                {activeTab === 'strategy' && (
+                    <div className="h-full w-full flex flex-col p-4 bg-muted/5 animate-in fade-in">
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 className="text-lg font-bold flex items-center gap-2">
+                                    <TrendingUp className="w-5 h-5 text-primary" /> Case Strategy
+                                </h3>
+                                <p className="text-xs text-muted-foreground">Viability Assessment & LegalBench Analysis Tools.</p>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                                <Tabs value={strategySubTab} onValueChange={(v: any) => setStrategySubTab(v)}>
+                                    <TabsList className="bg-muted/50 h-8">
+                                        <TabsTrigger value="viability" className="text-xs h-6 px-2">Merits</TabsTrigger>
+                                        <TabsTrigger value="legalbench" className="text-xs h-6 px-2 flex gap-1"><Microscope className="w-3 h-3"/> Deep Analysis</TabsTrigger>
+                                    </TabsList>
+                                </Tabs>
+                                {strategySubTab === 'viability' && (
+                                    <Button onClick={handleRunAssessment} disabled={isAssessing} size="sm" className="h-8">
+                                        {isAssessing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <Gavel className="w-3.5 h-3.5 mr-2" />}
+                                        {caseData.viabilityAssessment ? 'Re-Assess' : 'Run Check'}
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex-1 min-h-0 bg-background border rounded-xl shadow-sm overflow-hidden">
+                            {strategySubTab === 'viability' ? (
+                                caseData.viabilityAssessment ? (
+                                    <ViabilityDashboard 
+                                        assessment={caseData.viabilityAssessment} 
+                                        onUpdate={(updated) => updateCase({ viabilityAssessment: updated })}
+                                    />
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-4">
+                                        <Scale className="w-16 h-16 opacity-20" />
+                                        <div className="text-center max-w-md">
+                                            <h4 className="font-semibold text-foreground">No Assessment Generated</h4>
+                                            <p className="text-sm mt-2">
+                                                Run a diagnostic to evaluate the "Balance of Equities", win probability, and key strengths/weaknesses based on your current documents.
+                                            </p>
+                                        </div>
+                                        <Button variant="outline" onClick={handleRunAssessment} disabled={isAssessing}>
+                                            Start Assessment
+                                        </Button>
+                                    </div>
+                                )
+                            ) : (
+                                <LegalBenchTools 
+                                    apiKey={apiKey} 
+                                    inputText={caseData.input || caseData.report?.fullExtractedText} 
+                                    allDocuments={caseData.documents}
+                                />
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* 4. DOCUMENTS TAB (Using ResourceExplorer) */}
                 {activeTab === 'documents' && (
                     <ResourceExplorer
                         items={documentResources}
@@ -400,7 +496,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                     onChange={(e) => e.target.files?.[0] && handleAddDocument(e.target.files[0])} 
                 />
 
-                {/* 4. NOTES TAB (Using ResourceExplorer) */}
+                {/* 5. NOTES TAB (Using ResourceExplorer) */}
                 {activeTab === 'notes' && (
                     <ResourceExplorer
                         items={noteResources}
@@ -410,14 +506,89 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                     />
                 )}
 
-                {/* 5. EXHIBITS TAB (Using ResourceExplorer - Placeholder) */}
+                {/* 6. EXHIBITS TAB (Formal Legal Table) */}
                 {activeTab === 'exhibits' && (
-                    <ResourceExplorer
-                        items={[]}
-                        addItemLabel="Tag Exhibit"
-                        onAddItem={() => alert("Coming soon")}
-                        emptyMessage="No exhibits tagged yet."
-                    />
+                    <div className="h-full flex flex-col bg-background p-4 animate-in fade-in">
+                        <div className="mb-4 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-lg font-bold flex items-center gap-2">
+                                    <Gavel className="w-5 h-5 text-primary" /> Exhibit List
+                                </h3>
+                                <p className="text-xs text-muted-foreground">Formal evidence list for trial preparation (Marked for Identification).</p>
+                            </div>
+                            <Button size="sm" onClick={() => alert("Ask the AI to mark documents as exhibits!")}>
+                                <Plus className="w-4 h-4 mr-2" /> Mark New Exhibit
+                            </Button>
+                        </div>
+
+                        <div className="border rounded-lg overflow-hidden bg-card">
+                            <table className="w-full text-sm">
+                                <thead className="bg-muted/50 border-b">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left font-medium text-muted-foreground w-32">Designation</th>
+                                        <th className="px-4 py-2 text-left font-medium text-muted-foreground">Description</th>
+                                        <th className="px-4 py-2 text-left font-medium text-muted-foreground w-32">Date Marked</th>
+                                        <th className="px-4 py-2 text-center font-medium text-muted-foreground w-48">Admissibility</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {caseData.exhibits.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                                                No exhibits marked yet. Ask the AI to "Mark [Document] as Exhibit A".
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        caseData.exhibits.map(ex => (
+                                            <tr key={ex.id} className="border-b last:border-0 hover:bg-muted/20">
+                                                <td className="px-4 py-3 font-mono font-bold text-primary">{ex.designation}</td>
+                                                <td className="px-4 py-3">{ex.description}</td>
+                                                <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(ex.markedDate).toLocaleDateString()}</td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex justify-center gap-1">
+                                                        <Badge 
+                                                            variant="outline" 
+                                                            className={cn(
+                                                                "cursor-pointer hover:bg-primary/10",
+                                                                ex.status === 'marked' && "bg-blue-500/10 text-blue-600 border-blue-500/30"
+                                                            )}
+                                                            onClick={() => updateExhibitStatus(ex.id, 'marked')}
+                                                        >
+                                                            ID
+                                                        </Badge>
+                                                        <Badge 
+                                                            variant="outline" 
+                                                            className={cn(
+                                                                "cursor-pointer hover:bg-primary/10",
+                                                                ex.status === 'offered' && "bg-amber-500/10 text-amber-600 border-amber-500/30"
+                                                            )}
+                                                            onClick={() => updateExhibitStatus(ex.id, 'offered')}
+                                                        >
+                                                            OFF
+                                                        </Badge>
+                                                        <Badge 
+                                                            variant="outline" 
+                                                            className={cn(
+                                                                "cursor-pointer hover:bg-primary/10",
+                                                                ex.status === 'admitted' && "bg-green-500/10 text-green-600 border-green-500/30"
+                                                            )}
+                                                            onClick={() => updateExhibitStatus(ex.id, 'admitted')}
+                                                        >
+                                                            EVID
+                                                        </Badge>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
+                            <AlertCircle className="w-3 h-3" />
+                            <span>Ensure all exhibits are exchanged with opposing counsel prior to trial.</span>
+                        </div>
+                    </div>
                 )}
 
             </div>

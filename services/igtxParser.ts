@@ -27,8 +27,13 @@ const GLOSS_SEPARATOR_REGEX = /[=:]/;
 const LEGAL_CAPTION_REGEX = /(SUPREME|COUNTY|FAMILY|CIVIL|DISTRICT|CIRCUIT)\s+COURT/i;
 const LEGAL_VS_REGEX = /\s+(v\.|vs\.|against)\s+/i;
 const LEGAL_INDEX_REGEX = /(Index|Docket|Case)\s+(No\.|Number|#|ID)\s*:?\s*([A-Z0-9\/-]+)/i;
-const LEGAL_PARTIES_REGEX = /(Plaintiff|Defendant|Petitioner|Respondent)/i;
 const LEGAL_KEYWORDS_REGEX = /(WHEREFORE|PLEASE TAKE NOTICE|AFFIDAVIT|SWORN TO|ORDERED|ADJUDGED|DECREED)/;
+
+// --- Contract Regex ---
+const CONTRACT_HEADER_REGEX = /(AGREEMENT|CONTRACT|LEASE|LICENSE|OCCUPANCY|INDENTURE|MEMORANDUM OF UNDERSTANDING)\s+made/i;
+const CONTRACT_RECITALS_REGEX = /^\s*(WHEREAS|WITNESSETH|NOW, THEREFORE|BACKGROUND)/i;
+const CONTRACT_DEFINITIONS_REGEX = /^\s*(DEFINITIONS|INTERPRETATION)/i;
+const CONTRACT_SIGNATURE_REGEX = /IN WITNESS WHEREOF|SIGNED BY|By:/i;
 
 const DIGIT_REGEX = /\d/;
 const SPLIT_REGEX = /[\s\-,.=]+/;
@@ -288,6 +293,13 @@ function tier4Check(text: string, domain: ParserDomain, languageHint?: string, d
          totalScore += 0.30;
          signals.push({ feature: 'legal_header', weight: 0.30, description: `Found Court jurisdiction: ${courtMatch[0]}` });
      }
+
+     // Contract Checks
+     const contractMatch = text.match(CONTRACT_HEADER_REGEX);
+     if (contractMatch) {
+         totalScore += 0.50;
+         signals.push({ feature: 'legal_header', weight: 0.50, description: 'Detected Contract/Agreement structure' });
+     }
   } else {
       // LINGUISTIC TIER 4 CHECKS
       const orthoMatches = (text.match(COMPLEX_ORTHO_REGEX) || []).length;
@@ -340,6 +352,11 @@ function calculateConfidence(line: string, profile: LanguageProfile, domain: Par
      if (LEGAL_VS_REGEX.test(clean)) {
          score += 0.35;
      }
+     // Contract Heuristics
+     if (CONTRACT_RECITALS_REGEX.test(clean) || CONTRACT_DEFINITIONS_REGEX.test(clean)) {
+         score += 0.4;
+     }
+
      // Penalize standalone numbers or very short lines in legal (usually page numbers/line numbers)
      if (clean.length < 4 && DIGIT_REGEX.test(clean)) {
          score -= 0.4;
@@ -462,7 +479,8 @@ export function parseIGT(
           parties: [],
           case_meta: { index_number: null, court: null, doc_type: null },
           legal_points: [],
-          foundational_docs: []
+          foundational_docs: [],
+          contract_analysis: undefined
       } : undefined,
       vector_state: { embedding: null, model: null, dimensionality: null },
       integrity: { hash: b.id, warnings: b.warnings }

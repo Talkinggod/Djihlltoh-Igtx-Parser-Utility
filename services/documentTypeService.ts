@@ -58,9 +58,9 @@ const DEFAULT_DEFINITIONS: DocumentTypeDefinition[] = [
     },
     {
         id: 'lease_agreement',
-        name: 'Lease Agreement',
+        name: 'Residential Lease',
         category: 'contract',
-        description: 'Real property rental contract.',
+        description: 'Real property rental contract for residential use.',
         actions: [
             { id: 'review_riders', label: 'Review Riders', type: 'internal', priority: 'high' }
         ],
@@ -70,6 +70,38 @@ const DEFAULT_DEFINITIONS: DocumentTypeDefinition[] = [
             { scenario: 'Non-Payment', recommendation: 'Verify default notice provisions.' }
         ],
         requiredSections: ['Parties', 'Demised Premises', 'Rent Schedule', 'Signature Page']
+    },
+    {
+        id: 'commercial_lease',
+        name: 'Commercial Lease',
+        category: 'contract',
+        description: 'Business property rental contract. High risk of one-sided terms.',
+        actions: [
+            { id: 'check_guaranty', label: 'Check Good Guy Guaranty', type: 'internal', priority: 'critical' },
+            { id: 'verify_use_clause', label: 'Verify Use Clause', type: 'internal', priority: 'high' }
+        ],
+        deadlines: [],
+        relatedMotions: [],
+        strategies: [
+            { scenario: 'Build-out', recommendation: 'Ensure "Rent Commencement Date" accounts for permit delays.' }
+        ],
+        requiredSections: ['Base Rent', 'Additional Rent (Tax/CAM)', 'Use Clause', 'Default', 'Good Guy Guaranty']
+    },
+    {
+        id: 'software_license',
+        name: 'Software License (EULA/SaaS)',
+        category: 'contract',
+        description: 'Agreement for use of software or SaaS platform.',
+        actions: [
+            { id: 'check_indemnity', label: 'Review Indemnification', type: 'internal', priority: 'high' },
+            { id: 'data_ownership', label: 'Verify Data Ownership', type: 'internal', priority: 'critical' }
+        ],
+        deadlines: [],
+        relatedMotions: [],
+        strategies: [
+            { scenario: 'Termination', recommendation: 'Ensure data export capability upon termination.' }
+        ],
+        requiredSections: ['Grant of License', 'Restrictions', 'Fees', 'Limitation of Liability']
     }
 ];
 
@@ -105,11 +137,13 @@ export const DocumentTypeService = {
 
     // Simple heuristic to guess type from filename or raw text snippet
     detectType: (text: string): string | undefined => {
-        const lower = text.toLowerCase().slice(0, 2000); // Check header
+        const lower = text.toLowerCase().slice(0, 3000); // Check header
         if (lower.includes('complaint') && lower.includes('plaintiff')) return 'complaint_civil';
         if (lower.includes('motion to dismiss') || lower.includes('cplr 3211')) return 'motion_to_dismiss';
         if (lower.includes('answer') && lower.includes('verified')) return 'answer_verified';
-        if (lower.includes('lease') && lower.includes('agreement')) return 'lease_agreement';
+        if (lower.includes('residential lease')) return 'lease_agreement';
+        if (lower.includes('commercial lease') || (lower.includes('lease') && lower.includes('demised premises'))) return 'commercial_lease';
+        if (lower.includes('license agreement') || lower.includes('software as a service') || lower.includes('saas')) return 'software_license';
         return undefined;
     }
 };
