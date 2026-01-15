@@ -193,8 +193,8 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
     return (
         <div className="h-full flex flex-col bg-background outline-none" ref={containerRef} tabIndex={0}>
             {/* Toolbar */}
-            <div className="h-12 border-b bg-muted/20 px-4 flex items-center justify-between shrink-0 gap-4">
-                <div className="flex items-center gap-2">
+            <div className="h-12 border-b bg-muted/20 px-4 flex items-center justify-between shrink-0 gap-4 overflow-hidden">
+                <div className="flex items-center gap-2 shrink-0">
                     <div className="flex bg-muted rounded-md p-0.5">
                         <Button 
                             variant="ghost" 
@@ -217,7 +217,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                     </div>
 
                     {filterOptions && (
-                        <div className="flex bg-muted/50 rounded-md p-0.5 ml-2 overflow-x-auto scrollbar-hide max-w-[200px] md:max-w-none">
+                        <div className="flex bg-muted/50 rounded-md p-0.5 ml-2 overflow-x-auto scrollbar-hide max-w-[150px] md:max-w-none">
                             {filterOptions.map(opt => (
                                 <button
                                     key={opt.value}
@@ -245,7 +245,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                 </div>
 
                 {onAddItem && (
-                    <Button size="sm" onClick={onAddItem} className="shrink-0">
+                    <Button size="sm" onClick={onAddItem} className="shrink-0 text-xs h-8">
                         {addItemLabel}
                     </Button>
                 )}
@@ -255,7 +255,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
             <div 
                 className={cn(
                     "flex-1 overflow-y-auto p-4 custom-scrollbar",
-                    viewMode === 'grid' ? "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 content-start" : "flex flex-col gap-1"
+                    viewMode === 'grid' ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start" : "flex flex-col gap-1"
                 )}
                 onClick={() => setSelectedIndex(null)}
             >
@@ -306,7 +306,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                             <div className={cn("min-w-0 flex-1", viewMode === 'grid' ? "text-center w-full" : "flex items-center justify-between")}>
                                 <div className={cn("flex flex-col min-w-0", viewMode === 'grid' && "items-center")}>
                                     <span className={cn(
-                                        "font-medium truncate leading-tight w-full", 
+                                        "font-medium truncate leading-tight w-full block", 
                                         viewMode === 'grid' ? "text-xs md:text-sm" : "text-sm",
                                         selectedIndex === idx && "text-blue-600 dark:text-blue-400"
                                     )} title={item.title}>

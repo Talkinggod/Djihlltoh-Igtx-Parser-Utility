@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Plus, FolderOpen, X, Briefcase, Scale, Clock, FileText, AlertCircle, Cloud } from 'lucide-react';
+import { Plus, Briefcase, Scale, FileText, AlertCircle, Cloud, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { CaseState } from '../types';
@@ -31,16 +31,25 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                 isOpen ? "w-64" : "w-14"
             )}
         >
-            <div className="p-3 border-b border-border/50 flex items-center justify-between shrink-0 h-16">
+            <div className={cn("border-b border-border/50 flex shrink-0 transition-all", isOpen ? "p-3 items-center justify-between h-14" : "flex-col items-center py-4 gap-4 h-auto")}>
                 {isOpen ? (
-                    <span className="text-sm font-bold flex items-center gap-2 text-foreground">
-                        <Briefcase className="w-4 h-4 text-primary" />
-                        Case Files
-                    </span>
+                    <>
+                        <span className="text-sm font-bold flex items-center gap-2 text-foreground truncate">
+                            <Briefcase className="w-4 h-4 text-primary" />
+                            Case Files
+                        </span>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:bg-muted" onClick={toggleSidebar} title="Collapse Sidebar">
+                            <PanelLeftClose className="w-4 h-4" />
+                        </Button>
+                    </>
                 ) : (
-                    <div className="w-full flex justify-center">
+                    <>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:bg-muted" onClick={toggleSidebar} title="Expand Sidebar">
+                            <PanelLeftOpen className="w-4 h-4" />
+                        </Button>
+                        <div className="w-full h-px bg-border/50" />
                         <Briefcase className="w-5 h-5 text-primary" />
-                    </div>
+                    </>
                 )}
             </div>
 
@@ -110,9 +119,10 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                     variant="outline" 
                     className={cn(
                         "w-full gap-2 border-dashed border-primary/30 hover:border-primary hover:bg-primary/5 hover:text-primary transition-all",
-                        !isOpen && "px-0 justify-center"
+                        !isOpen && "px-0 justify-center h-9 w-9"
                     )}
                     onClick={onCreateCase}
+                    title="New Case"
                 >
                     <Plus className="w-4 h-4" />
                     {isOpen && "New Case"}
@@ -123,7 +133,7 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                         variant="ghost" 
                         className={cn(
                             "w-full gap-2 text-xs text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10",
-                            !isOpen && "px-0 justify-center"
+                            !isOpen && "px-0 justify-center h-9 w-9"
                         )}
                         onClick={onConnectCloud}
                         title="Link Google Drive Folder"
