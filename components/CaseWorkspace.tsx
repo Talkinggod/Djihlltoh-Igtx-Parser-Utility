@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment, CustomRule, CaseEvent } from '../types';
+import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment, CustomRule, CaseEvent, DocCategory } from '../types';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { InputSection } from './InputSection';
 import { OutputSection } from './OutputSection';
 import { ResourceExplorer, ResourceItem } from './ResourceExplorer';
 import { ViabilityDashboard } from './ViabilityDashboard';
 import { LegalBenchTools } from './LegalBenchTools';
-import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope, Bell, Filter, Check, X, Info, AlertTriangle } from 'lucide-react';
+import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope, Bell, Filter, Check, X, Info, AlertTriangle, FolderTree } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
@@ -16,6 +16,7 @@ import { GoogleDriveService } from '../services/googleDriveService';
 import { ResizableSplitView } from './ui/ResizableSplitView';
 import { generateViabilityAssessment } from '../services/aiService';
 import { RuleEditorDialog } from './RuleEditorDialog';
+import { FileSystemService } from '../services/fileSystemService';
 
 interface CaseWorkspaceProps {
     caseData: CaseState;
@@ -37,6 +38,8 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     const [exhibitFilter, setExhibitFilter] = useState<ExhibitStatus | 'all'>('all');
     const [isAssessing, setIsAssessing] = useState(false);
     const [isRuleEditorOpen, setIsRuleEditorOpen] = useState(false);
+    const [scaffolding, setScaffolding] = useState(false);
+    
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const templateInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -76,12 +79,30 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
             type: file.type,
             content: content,
             side: 'neutral',
-            dateAdded: new Date().toISOString()
+            dateAdded: new Date().toISOString(),
+            category: 'other' // Default
         };
 
         updateCase({
             documents: [...caseData.documents, newDoc]
         });
+    };
+
+    const handleScaffoldFolders = async () => {
+        if (!caseData.directoryHandle) {
+            alert("Please connect a Local Folder first (top right header).");
+            return;
+        }
+        setScaffolding(true);
+        try {
+            await FileSystemService.scaffoldCaseStructure(caseData.directoryHandle, caseData.name);
+            alert("Structure created successfully on local disk!");
+        } catch(e: any) {
+            console.error(e);
+            alert("Scaffolding failed: " + e.message);
+        } finally {
+            setScaffolding(false);
+        }
     };
 
     const handleDriveDocumentImport = async () => {
@@ -96,7 +117,8 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                 type: file.mimeType,
                 content: content,
                 side: 'neutral',
-                dateAdded: new Date().toISOString()
+                dateAdded: new Date().toISOString(),
+                category: 'other'
             };
             
             updateCase({ documents: [...caseData.documents, newDoc] });
@@ -237,21 +259,28 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
 
     // --- Resource Mappers ---
 
-    const documentResources: ResourceItem[] = caseData.documents
-        .filter(d => docFilter === 'all' || d.side === docFilter)
-        .map(doc => ({
+    const getDocResources = () => {
+        const filtered = caseData.documents.filter(d => {
+            if (docFilter === 'all') return true;
+            // Support filtering by Side or Category
+            if (['plaintiff', 'defendant'].includes(docFilter)) return d.side === docFilter;
+            return d.category === docFilter; // Match category (pleading, motion, etc)
+        });
+
+        return filtered.map(doc => ({
             id: doc.id,
             title: doc.name,
-            subtitle: doc.side,
+            subtitle: doc.folderPath || doc.category, // Show folder path if available
             date: doc.dateAdded,
-            type: doc.type.includes('pdf') ? 'pdf' : 'text',
+            type: doc.type.includes('pdf') ? 'pdf' : 'text' as const,
             content: doc.content,
-            tags: [doc.type.split('/')[1] || 'doc'],
-            evidenceTags: doc.tags, // Pass advanced tags
+            tags: [doc.category || 'doc'],
+            evidenceTags: doc.tags,
             onAction: () => loadDocumentToAnalysis(doc),
             actionLabel: "Analyze",
             onDelete: () => deleteDocument(doc.id)
         }));
+    };
     
     const noteResources: ResourceItem[] = caseData.notes.map(note => ({
         id: note.id,
@@ -266,6 +295,17 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     }));
 
     const filteredExhibits = caseData.exhibits.filter(ex => exhibitFilter === 'all' || ex.status === exhibitFilter);
+
+    // --- DOC FILTER OPTIONS ---
+    const docFilters = [
+        { label: 'All Files', value: 'all' },
+        { label: '01 Pleadings', value: 'pleading' },
+        { label: '02 Discovery', value: 'discovery' },
+        { label: '03 Motions', value: 'motion' },
+        { label: '04 Admin', value: 'administrative' },
+        { label: '05 Exhibits', value: 'exhibit' },
+        { label: '07 Orders', value: 'order' }
+    ];
 
     return (
         <div className="flex flex-col h-full bg-background">
@@ -283,7 +323,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                             <TrendingUp className="w-4 h-4" /> <span className="hidden sm:inline">Strategy</span>
                         </TabsTrigger>
                         <TabsTrigger value="documents" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <Files className="w-4 h-4" /> <span className="hidden sm:inline">Documents</span>
+                            <Files className="w-4 h-4" /> <span className="hidden sm:inline">Files</span>
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.documents.length}</Badge>
                         </TabsTrigger>
                         <TabsTrigger value="exhibits" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
@@ -291,7 +331,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem]">{caseData.exhibits.length}</Badge>
                         </TabsTrigger>
                         <TabsTrigger value="events" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                            <Bell className="w-4 h-4" /> <span className="hidden sm:inline">Events</span>
+                            <Bell className="w-4 h-4" /> <span className="hidden sm:inline">Log</span>
                             {caseData.events.some(e => !e.read) && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
                         </TabsTrigger>
                         <TabsTrigger value="notes" className="gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
@@ -507,21 +547,39 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                     </div>
                 )}
 
-                {/* 4. DOCUMENTS TAB (Using ResourceExplorer) */}
+                {/* 4. DOCUMENTS TAB (Using ResourceExplorer with Scaffolding) */}
                 {activeTab === 'documents' && (
-                    <ResourceExplorer
-                        items={documentResources}
-                        addItemLabel="Upload Document"
-                        onAddItem={() => fileInputRef.current?.click()}
-                        emptyMessage="No documents found."
-                        filterOptions={[
-                            { label: 'All', value: 'all' },
-                            { label: 'Plaintiff', value: 'plaintiff' },
-                            { label: 'Defendant', value: 'defendant' }
-                        ]}
-                        activeFilter={docFilter}
-                        onFilterChange={(val) => setDocFilter(val)}
-                    />
+                    <div className="h-full flex flex-col">
+                        <div className="bg-blue-500/5 px-4 py-2 border-b border-blue-500/20 flex justify-between items-center text-xs">
+                            <span className="text-blue-700 font-medium flex items-center gap-2">
+                                <FolderTree className="w-4 h-4" /> 
+                                Local Sync: {caseData.directoryHandle ? caseData.directoryHandle.name : 'Not Connected'}
+                            </span>
+                            {caseData.directoryHandle && (
+                                <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-7 text-xs bg-background gap-2"
+                                    onClick={handleScaffoldFolders}
+                                    disabled={scaffolding}
+                                >
+                                    {scaffolding ? <Loader2 className="w-3 h-3 animate-spin"/> : <FolderTree className="w-3 h-3 text-emerald-600"/>}
+                                    Scaffold Standard Structure
+                                </Button>
+                            )}
+                        </div>
+                        <div className="flex-1 min-h-0">
+                            <ResourceExplorer
+                                items={getDocResources()}
+                                addItemLabel="Upload Document"
+                                onAddItem={() => fileInputRef.current?.click()}
+                                emptyMessage="No documents found."
+                                filterOptions={docFilters}
+                                activeFilter={docFilter}
+                                onFilterChange={(val) => setDocFilter(val)}
+                            />
+                        </div>
+                    </div>
                 )}
                 {/* Hidden File Input for Documents */}
                 <input 

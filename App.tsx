@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { CaseSidebar } from './components/CaseSidebar';
@@ -22,6 +23,7 @@ function App() {
   const [lang, setLang] = useState<UILanguage>('en');
   const [googleUser, setGoogleUser] = useState<GoogleUser | undefined>(undefined);
   const [isIframe, setIsIframe] = useState(false);
+  const [storageWarning, setStorageWarning] = useState(false);
   
   // File Explorer State
   const [explorerState, setExplorerState] = useState<{
@@ -109,14 +111,44 @@ function App() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
-  // Persistence Effect
+  // Persistence Effect with Quota Protection
   useEffect(() => {
-      // We strip out directoryHandle before saving to localStorage
-      const serializableCases = cases.map(c => {
-          const { directoryHandle, ...rest } = c;
-          return rest;
-      });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableCases));
+      const saveState = () => {
+          try {
+              // Standard Save
+              const serializableCases = cases.map(c => {
+                  const { directoryHandle, ...rest } = c;
+                  return rest;
+              });
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableCases));
+              setStorageWarning(false);
+          } catch (e: any) {
+              // Handle Quota Exceeded
+              if (e.name === 'QuotaExceededError' || e.code === 22) {
+                  console.warn("LocalStorage quota exceeded. Saving metadata only.");
+                  setStorageWarning(true);
+                  
+                  // Fallback: Save cases but strip large text content from documents
+                  // We preserve structure/metadata but drop the heavy body text
+                  try {
+                      const slimCases = cases.map(c => {
+                          const { directoryHandle, documents, ...rest } = c;
+                          const slimDocs = documents.map(d => ({
+                              ...d,
+                              content: "" // Strip content to save space
+                          }));
+                          return { ...rest, documents: slimDocs };
+                      });
+                      localStorage.setItem(STORAGE_KEY, JSON.stringify(slimCases));
+                  } catch (retryErr) {
+                      console.error("Critical: Failed to save even slim state.", retryErr);
+                  }
+              }
+          }
+      };
+      
+      const timeoutId = setTimeout(saveState, 1000); // Debounce save
+      return () => clearTimeout(timeoutId);
   }, [cases]);
 
   // Helper to access active case safely
@@ -195,9 +227,7 @@ function App() {
   };
 
   // --- Local Folder Sync Handler ---
-  // ... [Existing implementation omitted for brevity] ...
   const handleConnectLocalFolder = async () => {
-      // ... same as before
       if (!FileSystemService.isSupported()) {
           alert("Your browser does not support Local File System access. Please use Chrome, Edge, or Opera.");
           return;
@@ -209,8 +239,7 @@ function App() {
              const importedDocs = await FileSystemService.importFilesFromDirectory(dirHandle, activeCase.documents);
              const mergedDocuments = [...activeCase.documents, ...importedDocs];
              updateActiveCase({ directoryHandle: dirHandle, localSyncEnabled: true, documents: mergedDocuments });
-             const tempCase = { ...activeCase, directoryHandle: dirHandle, localSyncEnabled: true, documents: mergedDocuments };
-             await FileSystemService.syncCaseToLocal(tempCase, dirHandle);
+             // We do NOT immediately sync back to local to avoid overwriting unless scaffolds requested
              setExplorerState({ isOpen: true, mode: 'local' });
           } catch(e) { console.error(e); } finally { setImportStatus(null); }
       }
@@ -289,11 +318,6 @@ function App() {
       setCases(prev => prev.map(c => c.id === id ? { ...c, lastActive: new Date() } : c));
   };
 
-  const calculateCaseEvents = (currentCase: CaseState): CaseEvent[] => {
-      // ... same as before
-      return []; 
-  };
-
   const handleProcess = (sourceMeta: Partial<IGTXSource>, diagnostics?: PdfTextDiagnostics) => {
     if (!activeCase.input.trim()) return;
     updateActiveCase({ isProcessing: true, sourceMeta: { ...activeCase.sourceMeta, ...sourceMeta } });
@@ -339,6 +363,12 @@ function App() {
       {importStatus && (
           <div className="bg-primary/10 text-primary text-xs text-center py-1 animate-pulse font-medium">
               {importStatus}
+          </div>
+      )}
+      
+      {storageWarning && (
+          <div className="bg-amber-500/10 text-amber-600 text-xs text-center py-1 font-medium border-b border-amber-500/20">
+              Storage Warning: Browser quota exceeded. Case documents will be truncated in storage but remain active in session. Use Local Sync for large files.
           </div>
       )}
 
@@ -425,7 +455,7 @@ function App() {
                 updateActiveCase({ drafts: updatedDrafts });
             }
         }}
-        onUpdateCaseState={updateActiveCaseFunctional} // NEW: Pass functional updater
+        onUpdateCaseState={updateActiveCaseFunctional} 
         caseContext={{ id: activeCase.id, name: activeCase.name, docType: activeCase.docTypeId, events: activeCase.events, refDate: activeCase.referenceDate }}
         allDocuments={activeCase.documents.map(d => ({name: d.name, content: d.content}))}
         templates={activeCase.templates}

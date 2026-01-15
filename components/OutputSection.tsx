@@ -126,6 +126,7 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
   }
 
   const averageConfidence = report.stats.averageConfidence;
+  const timelineEvents = report.timeline || [];
   
   return (
     <Card className="flex flex-col h-full border-border shadow-md overflow-hidden">
@@ -134,7 +135,17 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
           <TabsList className="bg-muted/50">
             <TabsTrigger value="editor">{t.tab_clean}</TabsTrigger>
             <TabsTrigger value="report">{t.tab_pipeline}</TabsTrigger>
-            {domain === 'legal' && <TabsTrigger value="timeline" className="flex items-center gap-1"><Clock className="w-3 h-3"/> Timeline</TabsTrigger>}
+            {domain === 'legal' && (
+                <TabsTrigger value="timeline" className="flex items-center gap-1">
+                    <Clock className="w-3 h-3"/> 
+                    Timeline
+                    {timelineEvents.length > 0 && (
+                        <Badge variant="secondary" className="ml-1 h-4 px-1 text-[9px] min-w-[1rem] flex justify-center bg-background/50 text-foreground/80">
+                            {timelineEvents.length}
+                        </Badge>
+                    )}
+                </TabsTrigger>
+            )}
             <TabsTrigger value="json">{t.tab_schema}</TabsTrigger>
           </TabsList>
 
@@ -197,7 +208,7 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
 
           {domain === 'legal' && (
               <TabsContent value="timeline" className="min-h-full mt-0 p-0">
-                  <TimelineView dates={report.timeline || []} />
+                  <TimelineView dates={timelineEvents} />
               </TabsContent>
           )}
 

@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2, Settings, Lock, Check, FileCheck, Globe, Database, FolderSearch, Gavel, Tag, StopCircle } from 'lucide-react';
 import { Button } from './ui/button';
@@ -275,14 +274,14 @@ export const ChatBot: React.FC<ChatBotProps> = ({
             const sessionPromise = ai.live.connect({
                 model: 'gemini-2.5-flash-native-audio-preview-12-2025',
                 config: {
-                    responseModalities: [Modality.AUDIO],
+                    responseModalities: [Modality.AUDIO], 
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
                     },
                     systemInstruction: { parts: [{ text: systemInstruction }]},
-                    // Enable transcription to display chat bubbles
-                    inputAudioTranscription: { model: "gemini-2.5-flash-native-audio-preview-12-2025" },
-                    outputAudioTranscription: { model: "gemini-2.5-flash-native-audio-preview-12-2025" }
+                    // Enable transcription to display chat bubbles (Empty object enables it, do not pass model name here)
+                    inputAudioTranscription: {}, 
+                    outputAudioTranscription: {} 
                 },
                 callbacks: {
                     onopen: () => {
@@ -393,6 +392,10 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                         console.error("Live Session Error", e);
                         setIsLive(false);
                         setIsConnecting(false);
+                        // Provide user feedback if detailed error available
+                        if (e instanceof ErrorEvent && e.message) {
+                             alert(`Live Session Error: ${e.message}`);
+                        }
                     }
                 }
             });

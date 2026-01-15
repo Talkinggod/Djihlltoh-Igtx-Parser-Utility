@@ -2,12 +2,7 @@
 import { CaseState, StoredDocument, Note, ExplorerItem } from '../types';
 import { extractTextFromPdf } from './pdfExtractor';
 
-/**
- * Service to interact with the File System Access API.
- * This allows the app to Read/Write directly to a user-selected folder on their desktop.
- */
-
-// Types for the File System Access API (Polyfill for TypeScript)
+// Types for the File System Access API
 interface FileSystemHandle {
     kind: 'file' | 'directory';
     name: string;
@@ -38,59 +33,37 @@ export const FileSystemService = {
         return 'showDirectoryPicker' in window;
     },
 
-    /**
-     * Prompts the user to select a directory on their local machine.
-     * Returns the directory handle.
-     */
     selectDirectory: async (): Promise<FileSystemDirectoryHandle | null> => {
         try {
-            // @ts-ignore - Window type extension
+            // @ts-ignore
             const handle = await window.showDirectoryPicker({
                 mode: 'readwrite'
             });
             return handle;
         } catch (e: any) {
-            // Check if user cancelled
-            if (e.name === 'AbortError') {
-                return null;
-            }
-
+            if (e.name === 'AbortError') return null;
             console.error("Directory picker error:", e);
-
-            // Handle cross-origin iframe restriction (common in development environments)
-            // Error usually matches: "Failed to execute 'showDirectoryPicker' on 'Window': Cross origin sub frames aren't allowed to show a file picker."
             if (e.message && (e.message.includes('Cross origin sub frames') || e.message.includes('SecurityError'))) {
-                alert("BROWSER SECURITY RESTRICTION:\n\nLocal Drive access is blocked because this application is running inside a preview frame.\n\nSOLUTION: Please open this application in a New Tab (Full Window) to use Local Drive Sync.");
+                alert("BROWSER SECURITY RESTRICTION: Open in New Tab to use Local Drive Sync.");
             } else {
                 alert(`Failed to access local directory: ${e.message}`);
             }
-            
             return null;
         }
     },
 
-    /**
-     * Verifies we still have permission to access the handle (e.g. after reload).
-     */
     verifyPermission: async (handle: FileSystemDirectoryHandle, readWrite = true): Promise<boolean> => {
         const options: any = {};
         if (readWrite) {
             options.mode = 'readwrite';
         }
         // @ts-ignore
-        if ((await handle.queryPermission(options)) === 'granted') {
-            return true;
-        }
+        if ((await handle.queryPermission(options)) === 'granted') return true;
         // @ts-ignore
-        if ((await handle.requestPermission(options)) === 'granted') {
-            return true;
-        }
+        if ((await handle.requestPermission(options)) === 'granted') return true;
         return false;
     },
 
-    /**
-     * List all items in a directory handle for the File Explorer
-     */
     getDirectoryContents: async (dirHandle: FileSystemDirectoryHandle): Promise<ExplorerItem[]> => {
         const items: ExplorerItem[] = [];
         // @ts-ignore
@@ -109,16 +82,99 @@ export const FileSystemService = {
     },
 
     /**
-     * Saves the entire case structure to the local folder.
-     * Creates:
-     * - /Metadata.json
-     * - /Documents/[doc_name].txt
-     * - /Notes/[note_title].txt
+     * Physically creates the ProSePro / Dziłtǫ́ǫ́ standard litigation folder tree.
      */
+    scaffoldCaseStructure: async (rootHandle: FileSystemDirectoryHandle, caseName: string) => {
+        
+        // Define deep structure
+        const structure = {
+            '00_Case_Overview': [
+                { name: 'Chronology.md', content: '# Chronology\n\n' },
+                { name: 'Party_List.md', content: '# Party List\n\n' },
+                { name: 'Issues_Map.md', content: '# Issues Map\n\n' }
+            ],
+            '01_Pleadings': [
+                { name: 'Complaint', type: 'dir' },
+                { name: 'Answer', type: 'dir' },
+                { name: 'Counterclaims', type: 'dir' },
+                { name: 'Replies', type: 'dir' }
+            ],
+            '02_Discovery': [
+                { 
+                    name: 'Notices_to_Admit', 
+                    type: 'dir', 
+                    children: ['Fishman', 'Norris_McLaughlin', 'Management', 'Individual_Signatories']
+                },
+                { 
+                    name: 'Interrogatories', 
+                    type: 'dir',
+                    children: ['Drafts', 'Served']
+                },
+                { name: 'Demands_to_Produce', type: 'dir' },
+                { name: 'Accounting_Demands', type: 'dir' }
+            ],
+            '03_Motions': [
+                { name: 'Motions_to_Compel', type: 'dir' },
+                { name: 'Motions_to_Dismiss', type: 'dir' },
+                { name: 'Supporting_Affidavits', type: 'dir' }
+            ],
+            '04_Administrative': [
+                { 
+                    name: 'HPD', 
+                    type: 'dir',
+                    children: ['Verification_Letters', 'FOIL_Requests', 'Responses']
+                },
+                { name: 'Inspector_General', type: 'dir' },
+                { name: 'Other_Agencies', type: 'dir' }
+            ],
+            '05_Exhibits': [
+                { name: 'Correspondence', type: 'dir' },
+                { name: 'Agreements', type: 'dir' },
+                { name: 'Email_Proof', type: 'dir' },
+                { name: 'Accounting', type: 'dir' }
+            ],
+            '06_Court_Transcripts': [],
+            '07_Orders_and_Judgments': []
+        };
+
+        // Recursive helper
+        async function createNode(parentHandle: FileSystemDirectoryHandle, node: any) {
+            if (typeof node === 'string') {
+                // Simple folder string
+                await parentHandle.getDirectoryHandle(node, { create: true });
+            } else if (node.type === 'dir') {
+                const dir = await parentHandle.getDirectoryHandle(node.name, { create: true });
+                if (node.children) {
+                    for (const child of node.children) {
+                        await createNode(dir, child);
+                    }
+                }
+            } else if (node.content) {
+                // File
+                const fileHandle = await parentHandle.getFileHandle(node.name, { create: true });
+                const file = await fileHandle.getFile();
+                if (file.size === 0) {
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(node.content);
+                    await writable.close();
+                }
+            }
+        }
+
+        for (const [folderName, items] of Object.entries(structure)) {
+            const dirHandle = await rootHandle.getDirectoryHandle(folderName, { create: true });
+            if (Array.isArray(items)) {
+                for (const item of items) {
+                    await createNode(dirHandle, item);
+                }
+            }
+        }
+    },
+
     syncCaseToLocal: async (caseData: CaseState, dirHandle: FileSystemDirectoryHandle): Promise<void> => {
         if (!dirHandle) throw new Error("No directory handle provided");
 
-        // 1. Save Metadata
+        // 1. Save Metadata (Root)
         const metadata = {
             id: caseData.id,
             name: caseData.name,
@@ -128,35 +184,53 @@ export const FileSystemService = {
         };
         await writeFile(dirHandle, 'case_metadata.json', JSON.stringify(metadata, null, 2));
 
-        // 2. Save Documents Folder
-        const docsDir = await dirHandle.getDirectoryHandle('Documents', { create: true });
+        // 2. Save Documents into Structured Folders
         for (const doc of caseData.documents) {
-            // Sanitize filename
+            // Determine Target Folder based on Category
+            let targetDirName = '05_Exhibits'; // Default
+            
+            if (doc.category === 'pleading') targetDirName = '01_Pleadings';
+            else if (doc.category === 'discovery') targetDirName = '02_Discovery';
+            else if (doc.category === 'motion') targetDirName = '03_Motions';
+            else if (doc.category === 'administrative') targetDirName = '04_Administrative';
+            else if (doc.category === 'transcript') targetDirName = '06_Court_Transcripts';
+            else if (doc.category === 'order') targetDirName = '07_Orders_and_Judgments';
+            else if (doc.category === 'overview') targetDirName = '00_Case_Overview';
+
+            // Get or Create the folder
+            const targetDir = await dirHandle.getDirectoryHandle(targetDirName, { create: true });
+            
+            // Subfolder logic (if path provided in doc)
+            let finalDir = targetDir;
+            if (doc.folderPath) {
+                // handle "Notices_to_Admit" inside "02_Discovery"
+                const parts = doc.folderPath.split('/').filter(p => p !== targetDirName);
+                for (const part of parts) {
+                    finalDir = await finalDir.getDirectoryHandle(part, { create: true });
+                }
+            }
+
             const safeName = doc.name.replace(/[^a-z0-9.]/gi, '_');
             const content = `[Type: ${doc.type}] [Side: ${doc.side}]\n\n${doc.content}`;
-            await writeFile(docsDir, `${safeName}.txt`, content);
+            
+            // Write (Text file for simplicity, in real app would write binary for PDF)
+            // Ensure .txt extension if not present
+            const fileName = safeName.endsWith('.txt') || safeName.endsWith('.pdf') ? safeName : `${safeName}.txt`;
+            
+            // If it's a PDF stored as text in our app, we save as .txt locally so user can read content
+            // Real PDF binary sync requires Blob handling which we simulate here
+            await writeFile(finalDir, fileName + (fileName.endsWith('.pdf') ? '.txt' : ''), content);
         }
 
-        // 3. Save Notes Folder
-        const notesDir = await dirHandle.getDirectoryHandle('Notes', { create: true });
+        // 3. Save Notes (Into Overview or separate)
+        const notesDir = await dirHandle.getDirectoryHandle('00_Case_Overview', { create: true });
         for (const note of caseData.notes) {
             const safeTitle = note.title.replace(/[^a-z0-9]/gi, '_');
             const content = `Created: ${note.createdAt}\nUpdated: ${note.updatedAt}\n\n${note.content}`;
-            await writeFile(notesDir, `${safeTitle}.txt`, content);
-        }
-        
-        // 4. Save Active Analysis Report
-        if (caseData.report) {
-             const reportDir = await dirHandle.getDirectoryHandle('Reports', { create: true });
-             const filename = `Analysis_${new Date().toISOString().split('T')[0]}.json`;
-             await writeFile(reportDir, filename, JSON.stringify(caseData.report.igtxDocument, null, 2));
+            await writeFile(notesDir, `NOTE_${safeTitle}.txt`, content);
         }
     },
 
-    /**
-     * Recursively scans the directory and imports compatible files (PDF, TXT) into StoredDocuments.
-     * Skips files that are already in the case (by name).
-     */
     importFilesFromDirectory: async (
         dirHandle: FileSystemDirectoryHandle, 
         existingDocs: StoredDocument[],
@@ -167,11 +241,9 @@ export const FileSystemService = {
         async function traverse(handle: FileSystemDirectoryHandle | FileSystemFileHandle, path: string) {
             if (handle.kind === 'file') {
                 const fileHandle = handle as FileSystemFileHandle;
-                
-                // Skip system files or metadata
                 if (fileHandle.name.startsWith('.') || fileHandle.name === 'case_metadata.json') return;
                 
-                // Check if already exists in either the existing case or the new import list
+                // Avoid dupes
                 if (existingDocs.some(d => d.name === fileHandle.name) || newDocs.some(d => d.name === fileHandle.name)) {
                     return;
                 }
@@ -179,16 +251,7 @@ export const FileSystemService = {
                 const file = await fileHandle.getFile();
                 const type = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
                 
-                // Filter for compatible types (Text, PDF, Markdown)
-                // We also allow images but store them with a placeholder text for now as the app is text-centric
-                if (
-                    type.includes('pdf') || 
-                    type.includes('text') || 
-                    file.name.endsWith('.md') || 
-                    file.name.endsWith('.ts') || 
-                    file.name.endsWith('.json') ||
-                    type.includes('image')
-                ) {
+                if (type.includes('pdf') || type.includes('text') || file.name.endsWith('.md') || type.includes('image')) {
                     if (onProgress) onProgress(`Importing ${file.name}...`);
                     
                     let content = "";
@@ -196,29 +259,39 @@ export const FileSystemService = {
                         try {
                             const res = await extractTextFromPdf(file);
                             content = res.text;
-                        } catch (e) {
-                            content = `[Error extracting PDF: ${e instanceof Error ? e.message : String(e)}]`;
-                        }
+                        } catch (e) { content = `[Error extracting PDF]`; }
                     } else if (type.includes('image')) {
-                         content = `[Image File: ${file.name}] (OCR not yet run automatically)`;
+                         content = `[Image File: ${file.name}]`;
                     } else {
                         content = await file.text();
                     }
+
+                    // Infer Category from Path
+                    let category: any = 'other';
+                    if (path.includes('01_Pleadings')) category = 'pleading';
+                    else if (path.includes('02_Discovery')) category = 'discovery';
+                    else if (path.includes('03_Motions')) category = 'motion';
+                    else if (path.includes('04_Administrative')) category = 'administrative';
+                    else if (path.includes('05_Exhibits')) category = 'exhibit';
+                    else if (path.includes('06_Court_Transcripts')) category = 'transcript';
+                    else if (path.includes('07_Orders')) category = 'order';
 
                     newDocs.push({
                         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                         name: file.name,
                         type: type,
                         content: content,
-                        side: 'neutral', // Default
-                        dateAdded: new Date().toISOString()
+                        side: 'neutral',
+                        dateAdded: new Date().toISOString(),
+                        category: category,
+                        folderPath: path // Store the relative path
                     });
                 }
             } else if (handle.kind === 'directory') {
                 const dir = handle as FileSystemDirectoryHandle;
                 // @ts-ignore
                 for await (const entry of dir.values()) {
-                    await traverse(entry, `${path}/${entry.name}`);
+                    await traverse(entry, path ? `${path}/${entry.name}` : entry.name);
                 }
             }
         }
@@ -227,9 +300,6 @@ export const FileSystemService = {
         return newDocs;
     },
 
-    /**
-     * Helper for the chatbot to see file listing
-     */
     listFiles: async (dirHandle: FileSystemDirectoryHandle): Promise<string[]> => {
         const files: string[] = [];
         // @ts-ignore
@@ -240,7 +310,6 @@ export const FileSystemService = {
     }
 };
 
-// Helper to write file content
 async function writeFile(dirHandle: FileSystemDirectoryHandle, filename: string, content: string) {
     const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
     const writable = await fileHandle.createWritable();

@@ -106,6 +106,19 @@ export interface LegalAnalysisResult {
 export type PriorityLevel = 'critical' | 'high' | 'medium' | 'low';
 export type ActionType = 'filing' | 'response' | 'appearance' | 'service' | 'internal';
 
+// Categories updated to reflect rigorous Litigation Schema
+export type DocCategory = 
+    | 'pleading' 
+    | 'discovery' 
+    | 'motion' 
+    | 'administrative' 
+    | 'exhibit' 
+    | 'transcript' 
+    | 'order' // For Court Decisions/Orders
+    | 'overview' // For Case Chronology
+    | 'contract' 
+    | 'other';
+
 export interface DocumentTypeAction {
   id: string;
   label: string;
@@ -129,7 +142,7 @@ export interface DocumentTypeStrategy {
 export interface DocumentTypeDefinition {
   id: string; // normalized key e.g. "motion_to_dismiss"
   name: string; // Display name e.g. "Motion to Dismiss"
-  category: 'pleading' | 'motion' | 'discovery' | 'judgment' | 'contract' | 'other';
+  category: DocCategory;
   description: string;
   
   // The "Knowledge Graph" of this document type
@@ -206,7 +219,6 @@ export interface SemanticState {
 }
 
 export type DocStatus = 'checked_in' | 'missing' | 'unavailable' | 'unknown';
-export type DocCategory = 'statute' | 'case_law' | 'evidence' | 'contract' | 'affidavit';
 
 export interface FoundationalDocument {
     name: string;      // e.g. "CPLR 3211", "Lease Agreement", "Exhibit A"
@@ -433,6 +445,9 @@ export interface StoredDocument {
     // New: Semantic Tagging
     tags?: EvidenceTag[];
     markedAsExhibit?: string; // ID of the exhibit if marked
+    // NEW: File System Architecture
+    category?: DocCategory;
+    folderPath?: string; // e.g., "01_Pleadings/Complaint"
 }
 
 export type ExhibitStatus = 'potential' | 'marked' | 'offered' | 'admitted' | 'excluded';

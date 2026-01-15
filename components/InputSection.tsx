@@ -1,6 +1,6 @@
 
 import React, { useRef, useState } from 'react';
-import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel, Calendar, Database, Languages } from 'lucide-react';
+import { Upload, FileText, X, RefreshCw, Loader2, FileType, Eye, Edit3, Settings2, BookOpen, ChevronDown, ChevronUp, Info, Globe, Link, AlertCircle, Scale, Gavel, Calendar, Database, Languages, ScanLine } from 'lucide-react';
 import { Card, CardHeader, CardFooter, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -225,6 +225,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
       }, pdfDiagnostics, customRules);
   };
 
+  const isOcrActive = loadingStatus.includes("OCR") || loadingStatus.includes("Scanning");
+
   return (
     <Card className="flex flex-col h-full border-border shadow-md overflow-hidden relative">
       <CardHeader className="pb-3 border-b bg-muted/20 shrink-0">
@@ -418,8 +420,24 @@ export const InputSection: React.FC<InputSectionProps> = ({
                   {/* Loading Overlay */}
                   {(isLoadingFile || isScraping) && (
                     <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center z-10 m-2 rounded-lg">
-                       <Loader2 className="w-8 h-8 text-primary mb-2 animate-spin" />
-                       <p className="text-primary font-medium text-sm animate-pulse">{loadingStatus}</p>
+                       {isOcrActive ? (
+                           <div className="relative flex flex-col items-center gap-2">
+                               <div className="relative">
+                                   <ScanLine className="w-10 h-10 text-primary animate-pulse" />
+                                   <div className="absolute inset-0 flex items-center justify-center">
+                                       <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                                   </div>
+                               </div>
+                               <Badge variant="outline" className="bg-background/80 backdrop-blur-sm animate-in fade-in zoom-in">
+                                   OCR Active
+                               </Badge>
+                           </div>
+                       ) : (
+                           <Loader2 className="w-8 h-8 text-primary mb-2 animate-spin" />
+                       )}
+                       
+                       <p className="text-primary font-medium text-sm animate-pulse mt-2">{loadingStatus}</p>
+                       
                        {isLoadingFile && (
                            <div className="flex flex-col items-center gap-1 mt-3">
                                <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
