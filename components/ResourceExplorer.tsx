@@ -217,12 +217,12 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                     </div>
 
                     {filterOptions && (
-                        <div className="flex bg-muted/50 rounded-md p-0.5 ml-2">
+                        <div className="flex bg-muted/50 rounded-md p-0.5 ml-2 overflow-x-auto scrollbar-hide max-w-[200px] md:max-w-none">
                             {filterOptions.map(opt => (
                                 <button
                                     key={opt.value}
                                     className={cn(
-                                        "px-3 py-1 text-xs rounded-sm transition-all",
+                                        "px-3 py-1 text-xs rounded-sm transition-all whitespace-nowrap",
                                         activeFilter === opt.value ? "bg-background shadow-sm font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
                                     )}
                                     onClick={() => onFilterChange && onFilterChange(opt.value)}
@@ -234,7 +234,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                     )}
                 </div>
 
-                <div className="flex-1 max-w-sm relative">
+                <div className="flex-1 max-w-sm relative hidden sm:block">
                     <Search className="absolute left-2 top-2 w-4 h-4 text-muted-foreground" />
                     <input 
                         className="w-full bg-muted/40 border-none rounded-md pl-8 pr-4 py-1.5 text-sm focus:ring-1 focus:ring-primary"
@@ -278,9 +278,9 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                 else setIsPreviewOpen(true);
                             }}
                             className={cn(
-                                "group cursor-default transition-all duration-200 select-none",
+                                "group cursor-default transition-all duration-200 select-none overflow-hidden",
                                 viewMode === 'grid' 
-                                    ? "flex flex-col items-center gap-3 p-4 rounded-xl border-2 hover:bg-muted/50 relative"
+                                    ? "flex flex-col items-center gap-3 p-4 rounded-xl border-2 hover:bg-muted/50 relative w-full min-w-0"
                                     : "flex items-center gap-4 p-2 rounded-lg border-b border-transparent hover:bg-muted/50 px-4",
                                 selectedIndex === idx 
                                     ? "bg-blue-500/10 border-blue-500 ring-0 ring-offset-0 z-10" 
@@ -289,8 +289,8 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                         >
                             {/* Icon / Thumbnail */}
                             <div className={cn(
-                                "shrink-0 flex items-center justify-center shadow-sm bg-background rounded-lg border relative",
-                                viewMode === 'grid' ? "w-20 h-24 p-4" : "w-10 h-10 p-2"
+                                "shrink-0 flex items-center justify-center shadow-sm bg-background rounded-lg border relative overflow-hidden",
+                                viewMode === 'grid' ? "w-16 h-20 md:w-20 md:h-24 p-2 md:p-4" : "w-10 h-10 p-2"
                             )}>
                                 {getIcon(item.type)}
                                 {item.evidenceTags && item.evidenceTags.length > 0 && (
@@ -304,17 +304,17 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
 
                             {/* Metadata */}
                             <div className={cn("min-w-0 flex-1", viewMode === 'grid' ? "text-center w-full" : "flex items-center justify-between")}>
-                                <div className={cn("flex flex-col", viewMode === 'grid' && "items-center")}>
+                                <div className={cn("flex flex-col min-w-0", viewMode === 'grid' && "items-center")}>
                                     <span className={cn(
-                                        "font-medium truncate leading-tight", 
-                                        viewMode === 'grid' ? "text-sm w-full" : "text-sm",
+                                        "font-medium truncate leading-tight w-full", 
+                                        viewMode === 'grid' ? "text-xs md:text-sm" : "text-sm",
                                         selectedIndex === idx && "text-blue-600 dark:text-blue-400"
-                                    )}>
+                                    )} title={item.title}>
                                         {item.title}
                                     </span>
                                     <div className="flex items-center gap-2 mt-1 justify-center flex-wrap">
                                         {item.subtitle && (
-                                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider bg-muted px-1.5 rounded-sm">
+                                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider bg-muted px-1.5 rounded-sm truncate max-w-full">
                                                 {item.subtitle}
                                             </span>
                                         )}
@@ -327,7 +327,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                     </div>
                                     {/* Evidence Tags Display in Grid */}
                                     {viewMode === 'grid' && item.evidenceTags && item.evidenceTags.length > 0 && (
-                                        <div className="flex flex-wrap justify-center gap-1 mt-1">
+                                        <div className="flex flex-wrap justify-center gap-1 mt-1 w-full overflow-hidden h-4">
                                             {item.evidenceTags.slice(0, 2).map((tag, i) => (
                                                 <Badge key={i} variant="outline" className={cn(
                                                     "text-[8px] px-1 h-3.5 border-opacity-50",
@@ -344,7 +344,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
 
                                 {/* List View Columns */}
                                 {viewMode === 'list' && (
-                                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                    <div className="flex items-center gap-4 text-xs text-muted-foreground hidden md:flex">
                                         <div className="flex gap-1">
                                             {item.evidenceTags?.map((tag, i) => (
                                                 <Badge key={`ev-${i}`} variant="outline" className={cn(

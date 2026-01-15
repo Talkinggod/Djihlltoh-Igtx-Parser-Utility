@@ -33,15 +33,15 @@ export const ViabilityDashboard: React.FC<ViabilityDashboardProps> = ({ assessme
             
             {onUpdate && (
                 <div className="absolute top-4 right-4 z-10">
-                    <Button variant="outline" size="sm" className="gap-2 shadow-sm bg-background" onClick={() => setIsEditing(true)}>
-                        <Edit2 className="w-3.5 h-3.5" /> Edit Strategy
+                    <Button variant="outline" size="sm" className="gap-2 shadow-sm bg-background h-8" onClick={() => setIsEditing(true)}>
+                        <Edit2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Edit Strategy</span>
                     </Button>
                 </div>
             )}
 
             {/* Header / Executive Summary */}
-            <div className="flex flex-col md:flex-row gap-4 items-start">
-                <Card className="flex-1 bg-gradient-to-br from-card to-muted/20 border-primary/10">
+            <div className="flex flex-col lg:flex-row gap-4 items-start">
+                <Card className="flex-1 bg-gradient-to-br from-card to-muted/20 border-primary/10 w-full">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                             <TrendingUp className="w-4 h-4" /> Executive Summary
@@ -59,7 +59,7 @@ export const ViabilityDashboard: React.FC<ViabilityDashboardProps> = ({ assessme
                 </Card>
 
                 {/* Win Probability Gauge */}
-                <Card className="w-full md:w-64 shrink-0 flex flex-col items-center justify-center p-6 bg-card border-primary/20 relative overflow-hidden">
+                <Card className="w-full lg:w-64 shrink-0 flex flex-col items-center justify-center p-6 bg-card border-primary/20 relative overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-b from-transparent to-muted/20 pointer-events-none" />
                     <div className="relative z-10 flex flex-col items-center">
                         <span className="text-xs font-bold uppercase text-muted-foreground mb-2">Win Probability</span>
@@ -151,17 +151,19 @@ const FactorCard: React.FC<{ factor: ViabilityFactor, getScoreColor: (s: number)
     const Icon = getIconForCategory(factor.category);
     
     return (
-        <div className="border rounded-lg bg-card p-4 shadow-sm hover:border-primary/30 transition-colors">
+        <div className="border rounded-lg bg-card p-4 shadow-sm hover:border-primary/30 transition-colors flex flex-col h-full">
             <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-muted rounded-md text-muted-foreground">
+                <div className="flex items-center gap-2 overflow-hidden">
+                    <div className="p-1.5 bg-muted rounded-md text-muted-foreground shrink-0">
                         {Icon}
                     </div>
-                    <div>
-                        <div className="text-xs font-bold uppercase text-muted-foreground">{factor.category.replace(/_/g, ' ')}</div>
+                    <div className="min-w-0">
+                        <div className="text-xs font-bold uppercase text-muted-foreground truncate" title={factor.category.replace(/_/g, ' ')}>
+                            {factor.category.replace(/_/g, ' ')}
+                        </div>
                     </div>
                 </div>
-                <div className={cn("text-lg font-bold", getScoreColor(factor.score).split(' ')[0])}>
+                <div className={cn("text-lg font-bold shrink-0 ml-2", getScoreColor(factor.score).split(' ')[0])}>
                     {factor.score}/100
                 </div>
             </div>
@@ -174,11 +176,11 @@ const FactorCard: React.FC<{ factor: ViabilityFactor, getScoreColor: (s: number)
                 />
             </div>
 
-            <p className="text-xs text-foreground/80 mb-3 line-clamp-3 whitespace-pre-wrap">
+            <p className="text-xs text-foreground/80 mb-3 line-clamp-3 whitespace-pre-wrap flex-1">
                 {factor.rationale}
             </p>
 
-            <div className="space-y-1">
+            <div className="space-y-1 mt-auto">
                 {factor.key_strengths.length > 0 && (
                     <div className="flex items-start gap-1.5 text-[10px] text-emerald-600">
                         <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0" />

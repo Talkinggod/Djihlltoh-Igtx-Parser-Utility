@@ -124,7 +124,7 @@ function App() {
               setStorageWarning(false);
           } catch (e: any) {
               // Handle Quota Exceeded
-              if (e.name === 'QuotaExceededError' || e.code === 22) {
+              if (e.name === 'QuotaExceededError' || e.code === 22 || e.toString().includes('quota')) {
                   console.warn("LocalStorage quota exceeded. Saving metadata only.");
                   setStorageWarning(true);
                   
@@ -367,8 +367,8 @@ function App() {
       )}
       
       {storageWarning && (
-          <div className="bg-amber-500/10 text-amber-600 text-xs text-center py-1 font-medium border-b border-amber-500/20">
-              Storage Warning: Browser quota exceeded. Case documents will be truncated in storage but remain active in session. Use Local Sync for large files.
+          <div className="bg-amber-500/10 text-amber-600 text-xs text-center py-1 font-medium border-b border-amber-500/20 px-4">
+              <span className="font-bold">Storage Warning:</span> Browser quota exceeded. Large document text will be truncated in storage to prevent crash. Please use <strong>Local Sync</strong> for large cases.
           </div>
       )}
 

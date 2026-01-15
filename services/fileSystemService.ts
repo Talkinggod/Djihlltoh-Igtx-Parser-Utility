@@ -103,12 +103,20 @@ export const FileSystemService = {
                 { 
                     name: 'Notices_to_Admit', 
                     type: 'dir', 
-                    children: ['Fishman', 'Norris_McLaughlin', 'Management', 'Individual_Signatories']
+                    children: [
+                        { name: 'Fishman', type: 'dir' },
+                        { name: 'Norris_McLaughlin', type: 'dir' },
+                        { name: 'Management', type: 'dir' },
+                        { name: 'Individual_Signatories', type: 'dir' }
+                    ]
                 },
                 { 
                     name: 'Interrogatories', 
                     type: 'dir',
-                    children: ['Drafts', 'Served']
+                    children: [
+                        { name: 'Drafts', type: 'dir' },
+                        { name: 'Served', type: 'dir' }
+                    ]
                 },
                 { name: 'Demands_to_Produce', type: 'dir' },
                 { name: 'Accounting_Demands', type: 'dir' }
@@ -122,7 +130,11 @@ export const FileSystemService = {
                 { 
                     name: 'HPD', 
                     type: 'dir',
-                    children: ['Verification_Letters', 'FOIL_Requests', 'Responses']
+                    children: [
+                        { name: 'Verification_Letters', type: 'dir' },
+                        { name: 'FOIL_Requests', type: 'dir' },
+                        { name: 'Responses', type: 'dir' }
+                    ]
                 },
                 { name: 'Inspector_General', type: 'dir' },
                 { name: 'Other_Agencies', type: 'dir' }
