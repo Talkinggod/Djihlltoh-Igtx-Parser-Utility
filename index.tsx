@@ -1,6 +1,9 @@
+
 import React, { Component, ReactNode, ErrorInfo } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { ApiProvider } from './contexts/ApiContext';
 
 console.log("Starting application mount...");
 
@@ -100,7 +103,11 @@ try {
   root.render(
     <React.StrictMode>
       <ErrorBoundary>
-        <App />
+        <ApiProvider>
+          <ThemeProvider>
+            <App />
+          </ThemeProvider>
+        </ApiProvider>
       </ErrorBoundary>
     </React.StrictMode>
   );

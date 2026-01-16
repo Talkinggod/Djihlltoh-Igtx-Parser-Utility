@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { Layers, Terminal, ShieldCheck, Globe, Key, Check, XCircle, Eye, EyeOff, Copy, X, Scale, Library, Save, HardDrive, RefreshCw, LogIn, Database, FolderOpen, LogOut } from 'lucide-react';
+import { Layers, Terminal, ShieldCheck, Globe, Key, Check, XCircle, Eye, EyeOff, Copy, X, Scale, Library, Save, HardDrive, RefreshCw, LogIn, Database, FolderOpen, LogOut, Settings } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { translations } from '../services/translations';
 import { UILanguage, ParserDomain, GoogleUser } from '../types';
 import { GoogleDriveService } from '../services/googleDriveService';
+import { SettingsMenu } from './SettingsMenu';
 
 interface HeaderProps {
     lang: UILanguage;
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [imageError, setImageError] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [clientId, setClientId] = useState(() => localStorage.getItem('google_client_id') || '');
   const logoSrc = "https://pub-7ec44766314c42b7b7a0c3e78330b4a5.r2.dev/logo2.jpg";
   const t = translations[lang];
@@ -130,6 +132,9 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Right Side - Controls */}
         <div className="flex items-center gap-2 md:gap-4 z-20 shrink-0">
            
+           {/* Settings Menu Popup */}
+           {showSettings && <SettingsMenu onClose={() => setShowSettings(false)} />}
+
            {/* Config Popover for Client ID */}
            {showConfig && (
                <div className="absolute top-16 right-4 p-4 bg-popover border shadow-lg rounded-lg z-50 w-80 animate-in fade-in slide-in-from-top-2">
@@ -316,6 +321,17 @@ export const Header: React.FC<HeaderProps> = ({
            
            <div className="w-px h-6 bg-border hidden sm:block"></div>
            
+           {/* Global Settings Toggle */}
+           <Button 
+                variant="ghost" 
+                size="icon" 
+                className={cn("h-8 w-8 text-muted-foreground hover:text-foreground", showSettings && "bg-muted text-foreground")}
+                onClick={() => setShowSettings(!showSettings)}
+                title="Appearance Settings"
+           >
+               <Settings className="w-4 h-4" />
+           </Button>
+
            <div className="flex items-center gap-1">
                 <Globe className="w-4 h-4 text-muted-foreground" />
                 <select 

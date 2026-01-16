@@ -5,6 +5,7 @@ import { CaseSidebar } from './components/CaseSidebar';
 import { CaseWorkspace } from './components/CaseWorkspace';
 import { ChatBot } from './components/ChatBot';
 import { runIntegratedAnalysis } from './services/igtxParser';
+import { FileSystemService } from './services/fileSystemService';
 import { IGTXSource, UILanguage, PdfTextDiagnostics, CaseState, CaseMetadata, GoogleUser, Draft } from './types';
 import { cn } from './lib/utils';
 
@@ -20,30 +21,89 @@ function App() {
     return envKey || sessionStorage.getItem('gemini_api_key') || '';
   });
 
-  const [cases, setCases] = useState<CaseState[]>([{
-      id: 'phys-run-integrated',
-      name: 'Integrated Kernel Run',
-      domain: 'legal',
-      caseMeta: { type: 'Civil', jurisdiction: 'Supreme Court', plaintiffs: [], defendants: [], indexNumber: '' },
-      input: '',
-      report: null,
-      profile: 'generic',
-      referenceDate: new Date(),
-      lastActive: new Date(),
-      isProcessing: false,
-      documents: [],
-      events: [],
-      drafts: [],
-      notes: [],
-      exhibits: [],
-      localSyncEnabled: false,
-      λ_control: 0.45
-  }]);
+  // Initialize cases from LocalStorage or Default
+  const [cases, setCases] = useState<CaseState[]>(() => {
+      try {
+          const saved = localStorage.getItem('dziltoo_cases');
+          if (saved) {
+              const parsed = JSON.parse(saved);
+              return parsed.map((c: any) => ({
+                  ...c,
+                  // Revive Dates
+                  referenceDate: new Date(c.referenceDate),
+                  lastActive: new Date(c.lastActive),
+                  events: (c.events || []).map((e: any) => ({ ...e, timestamp: new Date(e.timestamp) })),
+                  // Ensure arrays exist
+                  documents: c.documents || [],
+                  notes: c.notes || [],
+                  drafts: c.drafts || [],
+                  exhibits: c.exhibits || [],
+                  claims: c.claims || [],
+                  // Reset handles (not serializable)
+                  directoryHandle: undefined 
+              }));
+          }
+      } catch (e) {
+          console.warn("Failed to load state from storage:", e);
+      }
+      
+      // Default State if no storage
+      return [{
+          id: 'phys-run-integrated',
+          name: 'Integrated Kernel Run',
+          domain: 'legal',
+          caseMeta: { type: 'Civil', jurisdiction: 'Supreme Court', plaintiffs: [], defendants: [], indexNumber: '' },
+          input: '',
+          report: null,
+          profile: 'generic',
+          referenceDate: new Date(),
+          lastActive: new Date(),
+          isProcessing: false,
+          documents: [],
+          events: [],
+          drafts: [],
+          notes: [],
+          exhibits: [],
+          localSyncEnabled: false,
+          λ_control: 0.45
+      }];
+  });
 
-  const [activeCaseId, setActiveCaseId] = useState<string>(cases[0].id);
+  const [activeCaseId, setActiveCaseId] = useState<string>(() => {
+      // Try to restore last active case ID, or default to first case
+      const savedId = localStorage.getItem('dziltoo_active_case_id');
+      return savedId || cases[0]?.id || 'phys-run-integrated';
+  });
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   const activeCase = cases.find(c => c.id === activeCaseId) || cases[0];
+
+  // Persistence & Auto-Save Effect
+  useEffect(() => {
+      const timer = setTimeout(() => {
+          // 1. Save to LocalStorage
+          try {
+              const serializableCases = cases.map(c => ({
+                  ...c,
+                  directoryHandle: undefined // Strip handle to avoid circular/serialization errors
+              }));
+              localStorage.setItem('dziltoo_cases', JSON.stringify(serializableCases));
+              localStorage.setItem('dziltoo_active_case_id', activeCaseId);
+          } catch (e) {
+              console.error("Storage quota exceeded or error:", e);
+          }
+
+          // 2. Auto-Save to Local Device (if connected)
+          const current = cases.find(c => c.id === activeCaseId);
+          if (current && current.directoryHandle) {
+              FileSystemService.syncCaseToLocal(current, current.directoryHandle)
+                  .catch(err => console.error("Auto-save to local drive failed:", err));
+          }
+      }, 1000); // Debounce 1s
+
+      return () => clearTimeout(timer);
+  }, [cases, activeCaseId]);
 
   const updateActiveCase = (updates: Partial<CaseState>) => {
       setCases(prev => prev.map(c => c.id === activeCaseId ? { ...c, ...updates, lastActive: new Date() } : c));

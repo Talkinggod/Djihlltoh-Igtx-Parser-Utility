@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutGrid, List as ListIcon, Search, Eye, FileText, Image, StickyNote, Clock, Scale, X } from 'lucide-react';
+import { LayoutGrid, List as ListIcon, Search, Eye, FileText, Image, StickyNote, Clock, Scale, X, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
@@ -79,6 +80,15 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                 case 'Space': e.preventDefault(); setIsPreviewOpen(prev => !prev); break;
                 case 'Enter': e.preventDefault(); if (selectedItem?.onAction) selectedItem.onAction(); break;
                 case 'Escape': if (isPreviewOpen) { e.preventDefault(); setIsPreviewOpen(false); } break;
+                case 'Delete': 
+                case 'Backspace':
+                    if (selectedItem?.onDelete && !isPreviewOpen) {
+                        e.preventDefault();
+                        if (confirm(`Are you sure you want to delete "${selectedItem.title}"?`)) {
+                            selectedItem.onDelete();
+                        }
+                    }
+                    break;
             }
 
             if (newIndex !== selectedIndex) {
@@ -180,6 +190,24 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                 selectedIndex === idx ? "bg-blue-500/10 border-blue-500 ring-0 ring-offset-0 z-10" : "border-transparent"
                             )}
                         >
+                            {/* Grid View Delete Button */}
+                            {viewMode === 'grid' && item.onDelete && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-20 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        if (confirm(`Are you sure you want to delete "${item.title}"?`)) {
+                                            item.onDelete!(); 
+                                        }
+                                    }}
+                                    title="Delete"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                            )}
+
                             <div className={cn(
                                 "shrink-0 flex items-center justify-center shadow-sm bg-background rounded-lg border relative overflow-hidden",
                                 viewMode === 'grid' ? "w-16 h-20 md:w-20 md:h-24 p-2 md:p-4" : "w-10 h-10 p-2"
@@ -227,10 +255,26 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                     )}
                                 </div>
                                 {viewMode === 'list' && (
-                                    <div className="flex items-center gap-4 text-xs text-muted-foreground hidden md:flex">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground hidden md:flex">
                                         {item.onAction && (
                                             <Button size="sm" variant="secondary" className="h-7 text-xs opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => { e.stopPropagation(); item.onAction!(); }}>
                                                 {item.actionLabel || "Open"}
+                                            </Button>
+                                        )}
+                                        {item.onDelete && (
+                                            <Button 
+                                                size="icon" 
+                                                variant="ghost" 
+                                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive hover:bg-destructive/10" 
+                                                onClick={(e) => { 
+                                                    e.stopPropagation(); 
+                                                    if (confirm(`Are you sure you want to delete "${item.title}"?`)) {
+                                                        item.onDelete!(); 
+                                                    }
+                                                }}
+                                                title="Delete"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
                                             </Button>
                                         )}
                                     </div>
@@ -243,7 +287,7 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
 
             {/* Footer Stats */}
             <div className="h-8 bg-muted/10 border-t flex items-center justify-center text-[10px] text-muted-foreground">
-                {filteredItems.length} items • {viewMode === 'grid' ? 'Grid View' : 'List View'} • Space to Preview
+                {filteredItems.length} items • {viewMode === 'grid' ? 'Grid View' : 'List View'} • Space to Preview • Del to Remove
             </div>
 
             {/* Preview Modal */}
@@ -258,7 +302,24 @@ export const ResourceExplorer: React.FC<ResourceExplorerProps> = ({
                                     <span className="text-[10px] text-muted-foreground">{new Date(selectedItem.date).toLocaleString()}</span>
                                 </div>
                             </div>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsPreviewOpen(false)}><X className="w-4 h-4" /></Button>
+                            <div className="flex items-center gap-2">
+                                {selectedItem.onDelete && (
+                                    <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                        onClick={() => {
+                                            if (confirm(`Are you sure you want to delete "${selectedItem.title}"?`)) {
+                                                selectedItem.onDelete!();
+                                                setIsPreviewOpen(false);
+                                            }
+                                        }}
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                )}
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsPreviewOpen(false)}><X className="w-4 h-4" /></Button>
+                            </div>
                         </div>
                         <div className="flex-1 overflow-auto bg-background/50 relative p-0 flex items-center justify-center">
                             {renderPreviewContent()}

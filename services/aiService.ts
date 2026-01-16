@@ -174,11 +174,11 @@ export async function sendChatMessage(
         1. **Exhibit Preparation**: You are responsible for "Marking for Identification". When a user asks to mark evidence, use the 'mark_exhibit' tool. Adhere to standard conventions (Plaintiff = Numbers, Defendant = Letters, or as requested).
         2. **Evidence Analysis**: You analyze documents for *Relevance*, *Temporal Significance*, and *Legal Implication*. Use 'tag_evidence' to attach metadata to documents.
         3. **Drafting & Composition**: You create legal documents. 
-           - Use 'create_new_draft' when starting a NEW document (e.g., creating a separate Affidavit, Notice, or Motion).
+           - Use 'create_new_draft' when starting a NEW document (e.g. creating a separate Affidavit, Notice, or Motion).
            - Use 'write_draft' to edit the currently open document.
         4. **Pipeline Awareness**: Be aware of the case status. If a deadline is approaching (based on context), prioritize evidence that supports the immediate filing.
         5. **Outcome Centered**: Focus on how a document proves or disproves a specific Cause of Action (IRAC Method).
-        6. **SKEPTIC MODE**: When analyzing contracts (Leases, Licenses, Occupancy Agreements, etc.), assume the role of a skeptical auditor. Flag ambiguities, missing definitions, one-sided terms, and statutory conflicts (e.g., Mitchell-Lama rules, Rent Stabilization).
+        6. **SKEPTIC MODE**: When analyzing contracts (Leases, Licenses, Occupancy Agreements, etc.), assume the role of a skeptical auditor. Flag ambiguities, missing definitions, one-sided terms, and statutory conflicts (e.g. Mitchell-Lama rules, Rent Stabilization).
         7. **Semantic Coherence Analyst**: You have access to "Linguistic Physics" metrics (Lambda, Kappa, R²). 
            - Use 'Lambda' (λ) to judge the structural coherence of a pleading or contract. High Lambda (>0.1) suggests a "Flight of Ideas" or poorly drafted argument. Low Lambda (<0.02) implies strong, persistent topical focus.
            - Use 'R²' to determine if the document has a consistent logical flow. R² < 0.8 suggests the text is disjointed or assembled from unrelated parts.
@@ -255,6 +255,80 @@ export async function sendChatMessage(
     }
 
     return { text: outputText };
+}
+
+/**
+ * Intent Tunnel Extraction Engine.
+ * Leverages the model to extract complex temporal and reference entities that regex misses.
+ */
+export async function extractLegalEntities(text: string, apiKey: string): Promise<{ dates: any[], references: any[] }> {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const prompt = `Task: Legal Entity Extraction (Intent Tunnel).
+    
+    Analyze the following legal document text. Extract TWO types of entities:
+    
+    1. **Dates**: Identify ALL relevant dates (Filing, Hearing, Service, Signature, Jurat, Deadlines, Incidents). 
+       - Normalize the date to YYYY-MM-DD.
+       - Provide the exact text snippet.
+       - Provide context (surrounding words).
+       - Classify the type (filing, hearing, service, signature, jurat, incident, deadline).
+    
+    2. **References**: Identify references to OTHER documents or exhibits.
+       - e.g. "Exhibit A", "Lease Agreement dated 2020", "Prior Order".
+       - Extract the full reference text.
+       - Estimate the year if mentioned.
+       - Classify document type.
+
+    RETURN JSON ONLY.`;
+
+    const schema = {
+        type: Type.OBJECT,
+        properties: {
+            dates: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        date_normalized: { type: Type.STRING, description: "YYYY-MM-DD" },
+                        text: { type: Type.STRING },
+                        context: { type: Type.STRING },
+                        type: { type: Type.STRING, enum: ['filing', 'hearing', 'service', 'signature', 'jurat', 'incident', 'deadline', 'reference'] }
+                    }
+                }
+            },
+            references: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        text: { type: Type.STRING },
+                        year: { type: Type.NUMBER, nullable: true },
+                        documentType: { type: Type.STRING, nullable: true }
+                    }
+                }
+            }
+        }
+    };
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt + "\n\nTEXT:\n" + text.slice(0, 30000), // Limit context
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: schema
+            }
+        });
+
+        const jsonStr = response.text;
+        if (!jsonStr) return { dates: [], references: [] };
+        
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        console.error("Intent Tunnel Extraction Failed", e);
+        return { dates: [], references: [] };
+    }
 }
 
 /**
@@ -336,6 +410,160 @@ export async function detectPotentialClaims(caseData: CaseState, apiKey: string)
         console.error("Claim detection failed", e);
         throw e; // Propagate error so UI can handle it
     }
+}
+
+/**
+ * Generates a comprehensive viability assessment for the case.
+ */
+export async function generateViabilityAssessment(caseData: CaseState, apiKey: string): Promise<ViabilityAssessment> {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    // Construct context from case metadata, input, and documents
+    const docsSummary = caseData.documents.map(d => `[${d.type}] ${d.name}: ${d.content.slice(0, 500)}...`).join('\n');
+    const context = `
+    CASE: ${caseData.name}
+    TYPE: ${caseData.caseMeta.type}
+    JURISDICTION: ${caseData.caseMeta.jurisdiction}
+    PLAINTIFF: ${caseData.caseMeta.plaintiffs.join(', ')}
+    DEFENDANT: ${caseData.caseMeta.defendants.join(', ')}
+    
+    USER NOTES:
+    ${caseData.input}
+    
+    DOCUMENTS AVAILABLE:
+    ${docsSummary}
+    `;
+
+    const prompt = `You are a Senior Litigation Strategist. Conduct a Viability Assessment for this case based on the provided context.
+    
+    Analyze:
+    1. Overall probability of success (0-100).
+    2. Key factors driving this probability (Strengths, Weaknesses, Legal Basis).
+    3. "Balance of Equities" - how a judge might view the fairness/hardship.
+    
+    Output structured JSON matching the ViabilityAssessment interface.`;
+
+    const schema = {
+        type: Type.OBJECT,
+        properties: {
+            overall_probability: { type: Type.NUMBER, description: "0-100 integer" },
+            executive_summary: { type: Type.STRING },
+            factors: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        category: { type: Type.STRING },
+                        score: { type: Type.NUMBER },
+                        rationale: { type: Type.STRING },
+                        key_strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        key_weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    }
+                }
+            },
+            balance_of_equities: {
+                type: Type.OBJECT,
+                properties: {
+                    plaintiff_equities: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    defendant_equities: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    conclusion: { type: Type.STRING }
+                }
+            }
+        }
+    };
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: prompt + "\n\n" + context,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: schema
+        }
+    });
+
+    const text = response.text || "{}";
+    const data = JSON.parse(text);
+    
+    return {
+        ...data,
+        generated_at: new Date().toISOString()
+    };
+}
+
+/**
+ * Runs a specific LegalBench task (NLI, Classification, Extraction).
+ */
+export async function runLegalBenchTask(
+    task: LegalBenchTaskType, 
+    params: { text: string, hypothesis?: string, context?: string }, 
+    apiKey: string
+): Promise<LegalBenchResult> {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    let instruction = "";
+    let prompt = `TEXT:\n${params.text}\n\n`;
+
+    switch (task) {
+        case 'contract_nli':
+            instruction = "Determine if the HYPOTHESIS is entailed by, contradicts, or is unrelated to the contract TEXT.";
+            prompt += `HYPOTHESIS: ${params.hypothesis}`;
+            break;
+        case 'hearsay':
+            instruction = "Analyze the text for Hearsay evidence rules (FRE 801/802). Is it hearsay? Is there an exception?";
+            if (params.context) prompt += `CONTEXT: ${params.context}`;
+            break;
+        case 'citation_retrieval':
+            instruction = "Extract exact legal citations from the text or find the relevant clause for the query.";
+            if (params.hypothesis) prompt += `QUERY: ${params.hypothesis}`;
+            break;
+        case 'rule_application':
+            instruction = "Apply the legal rule described in HYPOTHESIS to the FACTS in TEXT.";
+            prompt += `RULE/ISSUE: ${params.hypothesis}`;
+            break;
+        case 'abercrombie':
+            instruction = "Classify the distinctiveness of the mark/term (Generic, Descriptive, Suggestive, Arbitrary, Fanciful).";
+            if (params.context) prompt += `PRODUCT CLASS: ${params.context}`;
+            break;
+        case 'cuad_extraction':
+            instruction = "Extract critical contract clauses (Parties, Term, Termination, Governing Law, Liability).";
+            break;
+        default:
+            instruction = `Perform the task: ${task}`;
+            break;
+    }
+
+    const schema = {
+        type: Type.OBJECT,
+        properties: {
+            conclusion: { type: Type.STRING },
+            reasoning: { type: Type.STRING },
+            confidence: { type: Type.NUMBER },
+            citations: { type: Type.ARRAY, items: { type: Type.STRING } },
+            extracted_clauses: { 
+                type: Type.ARRAY, 
+                items: { 
+                    type: Type.OBJECT, 
+                    properties: { 
+                        type: { type: Type.STRING }, 
+                        text: { type: Type.STRING } 
+                    } 
+                } 
+            }
+        }
+    };
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: prompt,
+        config: {
+            systemInstruction: instruction,
+            responseMimeType: "application/json",
+            responseSchema: schema
+        }
+    });
+
+    const text = response.text || "{}";
+    return { ...JSON.parse(text), task };
 }
 
 /**
@@ -457,119 +685,6 @@ async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain,
         const text = response.text || "{}";
         const result = JSON.parse(text);
         return result.results || [];
-    } catch (e) {
-        console.error("Batch processing failed", e);
-        return [];
-    }
-}
-
-export async function generateViabilityAssessment(caseData: CaseState, apiKey: string): Promise<ViabilityAssessment> {
-    const ai = new GoogleGenAI({ apiKey });
-    
-    // Construct context from case data
-    const context = `Case Name: ${caseData.name}
-    Jurisdiction: ${caseData.caseMeta.jurisdiction}
-    Type: ${caseData.caseMeta.type}
-    
-    Key Documents:
-    ${caseData.documents.map(d => `- ${d.name} (${d.type}): ${d.content.slice(0, 500)}...`).join('\n')}
-    
-    User Input Notes:
-    ${caseData.input}
-    `;
-
-    const prompt = `Analyze the viability of this case. Provide a probability score (0-100), identify key factors (strengths/weaknesses), and balance the equities.`;
-
-    const schema = {
-        type: Type.OBJECT,
-        properties: {
-            overall_probability: { type: Type.NUMBER },
-            executive_summary: { type: Type.STRING },
-            factors: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        category: { type: Type.STRING },
-                        score: { type: Type.NUMBER },
-                        rationale: { type: Type.STRING },
-                        key_strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        key_weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } }
-                    }
-                }
-            },
-            balance_of_equities: {
-                type: Type.OBJECT,
-                properties: {
-                    plaintiff_equities: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    defendant_equities: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    conclusion: { type: Type.STRING }
-                }
-            },
-            generated_at: { type: Type.STRING }
-        }
-    };
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: prompt + "\n\n" + context,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: schema
-        }
-    });
-
-    const text = response.text || "{}";
-    const result = JSON.parse(text);
-    return {
-        ...result,
-        generated_at: new Date().toISOString()
-    };
-}
-
-export async function runLegalBenchTask(task: LegalBenchTaskType, inputs: { text: string, hypothesis?: string, context?: string }, apiKey: string): Promise<LegalBenchResult> {
-    const ai = new GoogleGenAI({ apiKey });
-    
-    let prompt = `Task: ${task}\nText: "${inputs.text}"`;
-    if (inputs.hypothesis) prompt += `\nHypothesis/Question: "${inputs.hypothesis}"`;
-    if (inputs.context) prompt += `\nContext: "${inputs.context}"`;
-
-    const systemInstruction = `You are an expert legal analyst performing the '${task}' task from the LegalBench benchmark.
-    Analyze the input and provide a conclusion, reasoning, and confidence score.`;
-
-    const schema = {
-        type: Type.OBJECT,
-        properties: {
-            task: { type: Type.STRING },
-            conclusion: { type: Type.STRING },
-            reasoning: { type: Type.STRING },
-            confidence: { type: Type.NUMBER },
-            citations: { type: Type.ARRAY, items: { type: Type.STRING } },
-            extracted_clauses: { 
-                type: Type.ARRAY, 
-                items: { 
-                    type: Type.OBJECT, 
-                    properties: { type: { type: Type.STRING }, text: { type: Type.STRING } } 
-                } 
-            }
-        }
-    };
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
-            contents: prompt,
-            config: {
-                systemInstruction: systemInstruction,
-                responseMimeType: "application/json",
-                responseSchema: schema,
-                tools: [{ googleSearch: {} }]
-            }
-        });
-
-        const text = response.text || "{}";
-        const result = JSON.parse(text);
-        return { ...result, task }; // Ensure task is correct
     } catch (e) {
         console.error("LegalBench task failed", e);
         throw e;

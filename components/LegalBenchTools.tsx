@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LegalBenchTaskType, LegalBenchResult, StoredDocument, LegalAnalysisResult } from '../types';
 import { runLegalBenchTask } from '../services/aiService';
 import { LegalAnalyzer } from '../services/legalAnalyzer';
@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
-import { Loader2, Gavel, FileCheck, Scale, AlertCircle, BookOpen, Search, ArrowRight, ShieldCheck, HelpCircle, Landmark, UserMinus, FileText, Quote, AlertTriangle, List, DollarSign, Bug, Clock, CheckCircle2 } from 'lucide-react';
+import { Loader2, Gavel, FileCheck, Scale, AlertCircle, BookOpen, Search, ArrowRight, ShieldCheck, HelpCircle, Landmark, UserMinus, FileText, Quote, AlertTriangle, List, DollarSign, Bug, Clock, CheckCircle2, ChevronDown, File, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface LegalBenchToolsProps {
@@ -16,9 +16,10 @@ interface LegalBenchToolsProps {
     allDocuments?: StoredDocument[];
 }
 
-export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputText, allDocuments }) => {
+export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputText, allDocuments = [] }) => {
     const [activeTask, setActiveTask] = useState<string>('contract_nli');
     const [analysisText, setAnalysisText] = useState(inputText || "");
+    const [selectedDocId, setSelectedDocId] = useState<string>("");
     const [hypothesis, setHypothesis] = useState("");
     const [context, setContext] = useState("");
     const [loading, setLoading] = useState(false);
@@ -26,6 +27,26 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
     
     // Anomaly State
     const [anomalyResult, setAnomalyResult] = useState<LegalAnalysisResult | null>(null);
+    const [useIntentTunnel, setUseIntentTunnel] = useState(false);
+
+    // Sync initial input text if no document is selected
+    useEffect(() => {
+        if (!selectedDocId && inputText) {
+            setAnalysisText(inputText);
+        }
+    }, [inputText, selectedDocId]);
+
+    const handleDocSelect = (docId: string) => {
+        setSelectedDocId(docId);
+        if (docId === "") {
+            setAnalysisText(inputText || "");
+            return;
+        }
+        const doc = allDocuments.find(d => d.id === docId);
+        if (doc) {
+            setAnalysisText(doc.content);
+        }
+    };
 
     const handleRun = async () => {
         if (!apiKey && activeTask !== 'anomaly_scan') {
@@ -33,7 +54,7 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
             return;
         }
         if (!analysisText.trim()) {
-            alert("Please provide text to analyze.");
+            alert("Please provide text to analyze or select a document.");
             return;
         }
 
@@ -43,14 +64,21 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
 
         try {
             if (activeTask === 'anomaly_scan') {
-                // Heuristic Analysis (Local)
                 const analyzer = new LegalAnalyzer();
-                const res = analyzer.analyze({
-                    id: 'current-doc',
+                const docPayload = {
+                    id: selectedDocId || 'current-doc',
                     content: analysisText,
                     documentType: 'unknown'
-                }, allDocuments);
-                setAnomalyResult(res);
+                };
+
+                if (useIntentTunnel && apiKey) {
+                    const res = await analyzer.analyzeWithIntentTunnel(docPayload, apiKey, allDocuments);
+                    setAnomalyResult(res);
+                } else {
+                    // Heuristic Analysis (Local)
+                    const res = analyzer.analyze(docPayload, allDocuments);
+                    setAnomalyResult(res);
+                }
             } else {
                 // AI Analysis
                 const res = await runLegalBenchTask(activeTask as LegalBenchTaskType, { 
@@ -101,6 +129,30 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
 
                 {/* INPUT AREA */}
                 <div className="grid gap-4">
+                    {/* Document Selector */}
+                    <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase text-muted-foreground flex justify-between items-center">
+                            <span>Select Source Document</span>
+                            {selectedDocId && <Badge variant="outline" className="text-[9px]">ID: {selectedDocId.slice(0,8)}</Badge>}
+                        </label>
+                        <div className="relative">
+                            <select 
+                                className="w-full h-10 bg-background border rounded-md pl-9 pr-4 text-sm appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+                                value={selectedDocId}
+                                onChange={(e) => handleDocSelect(e.target.value)}
+                            >
+                                <option value="">-- Use Active Editor Text --</option>
+                                {allDocuments.map(doc => (
+                                    <option key={doc.id} value={doc.id}>
+                                        {doc.name} ({doc.type.includes('pdf') ? 'PDF' : 'Text'})
+                                    </option>
+                                ))}
+                            </select>
+                            <File className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+                            <ChevronDown className="absolute right-3 top-3 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        </div>
+                    </div>
+
                     <div className="space-y-2">
                         <label className="text-xs font-semibold uppercase text-muted-foreground">
                             {activeTask === 'contract_nli' || activeTask === 'cuad_extraction' || activeTask === 'spa_extraction' ? "Contract Clause / Agreement Text" : 
@@ -113,11 +165,15 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
                              activeTask === 'abercrombie' ? "Mark / Term" : "Facts / Scenario"}
                         </label>
                         <textarea 
-                            className="w-full bg-background border rounded-md p-3 text-sm min-h-[100px] focus:ring-1 focus:ring-primary outline-none resize-none"
-                            placeholder="Paste text here..."
+                            className="w-full bg-background border rounded-md p-3 text-sm min-h-[150px] focus:ring-1 focus:ring-primary outline-none resize-none custom-scrollbar font-mono"
+                            placeholder="Select a document above or paste text here..."
                             value={analysisText}
                             onChange={(e) => setAnalysisText(e.target.value)}
                         />
+                        <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                            <span>{analysisText.length} characters</span>
+                            {selectedDocId && <span>Loaded from document</span>}
+                        </div>
                     </div>
 
                     {(activeTask === 'contract_nli' || activeTask === 'rule_application' || activeTask === 'citation_retrieval') && (
@@ -148,10 +204,25 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
                         </div>
                     )}
 
-                    <Button onClick={handleRun} disabled={loading} className="w-full sm:w-auto self-end">
-                        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}
-                        {activeTask === 'anomaly_scan' ? 'Run Heuristic Check' : 'Run Analysis'}
-                    </Button>
+                    <div className="flex items-center justify-between w-full">
+                        {activeTask === 'anomaly_scan' && (
+                            <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer select-none">
+                                <input 
+                                    type="checkbox" 
+                                    checked={useIntentTunnel} 
+                                    onChange={(e) => setUseIntentTunnel(e.target.checked)}
+                                    className="rounded border-primary/20 text-primary focus:ring-offset-0"
+                                />
+                                <span className={cn("flex items-center gap-1", useIntentTunnel && "text-primary")}>
+                                    <Zap className="w-3 h-3" /> Enable Intent Tunnel (AI Deep Extraction)
+                                </span>
+                            </label>
+                        )}
+                        <Button onClick={handleRun} disabled={loading || !analysisText.trim()} className="w-full sm:w-auto ml-auto">
+                            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}
+                            {activeTask === 'anomaly_scan' ? (useIntentTunnel ? 'Run Deep Analysis' : 'Run Heuristic Check') : 'Run Analysis'}
+                        </Button>
+                    </div>
                 </div>
             </Tabs>
 
@@ -266,6 +337,7 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
                         <CardHeader className="pb-2 bg-muted/20">
                             <CardTitle className="text-sm font-bold text-muted-foreground flex items-center gap-2">
                                 <Clock className="w-4 h-4" /> Extracted Timeline
+                                {anomalyResult.isAiAugmented && <Badge variant="outline" className="ml-auto text-[9px] bg-primary/10 text-primary border-primary/20"><Zap className="w-2.5 h-2.5 mr-1"/> AI Augmented</Badge>}
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
@@ -279,6 +351,7 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <Badge variant="secondary" className="text-[9px] uppercase">{d.type}</Badge>
+                                                {d.source === 'ai' && <span title="AI Extracted"><Zap className="w-3 h-3 text-amber-500" /></span>}
                                                 <span className="text-xs font-mono text-muted-foreground bg-muted px-1 rounded">{d.text}</span>
                                             </div>
                                             <p className="text-xs text-muted-foreground truncate italic">"...{d.context}..."</p>
@@ -314,7 +387,10 @@ export const LegalBenchTools: React.FC<LegalBenchToolsProps> = ({ apiKey, inputT
                                 {anomalyResult.references.length === 0 && <span className="text-xs text-muted-foreground">None</span>}
                                 {anomalyResult.references.slice(0, 5).map((r, i) => (
                                     <div key={i} className="text-xs border-b last:border-0 pb-1 mb-1">
-                                        <div className="font-medium truncate">{r.text}</div>
+                                        <div className="flex items-center gap-1">
+                                            <div className="font-medium truncate">{r.text}</div>
+                                            {r.source === 'ai' && <span title="AI Extracted"><Zap className="w-2.5 h-2.5 text-amber-500" /></span>}
+                                        </div>
                                         {r.documentType && <span className="text-[9px] text-muted-foreground bg-muted px-1 rounded">{r.documentType}</span>}
                                     </div>
                                 ))}

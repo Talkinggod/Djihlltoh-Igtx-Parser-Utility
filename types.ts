@@ -305,14 +305,17 @@ export interface LegalAnalysisResult {
     violations: Violation[];
     criticalCount: number;
     timestamp: Date;
+    // Track if AI was used for this result
+    isAiAugmented?: boolean;
 }
 
 export interface ExtractedDate {
     date: Date;
     text: string;
     context: string;
-    type: 'filing' | 'hearing' | 'service' | 'signature' | 'jurat' | 'reference';
+    type: 'filing' | 'hearing' | 'service' | 'signature' | 'jurat' | 'reference' | 'incident' | 'deadline';
     location: { start: number, end: number };
+    source?: 'regex' | 'ai'; // Provenance
 }
 
 export interface Violation {
@@ -327,6 +330,7 @@ export interface DocumentReference {
     year?: number;
     documentType?: string;
     location: { start: number, end: number };
+    source?: 'regex' | 'ai'; // Provenance
 }
 
 export interface Signature {

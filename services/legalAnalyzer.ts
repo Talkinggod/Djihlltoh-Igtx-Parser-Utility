@@ -1,6 +1,39 @@
 
 import { isValid, differenceInDays, isAfter, addDays, isBefore, parseISO } from 'date-fns';
 import { ExtractedDate, Violation, DocumentReference, Signature, LegalAnalysisResult, StoredDocument } from '../types';
+import { extractLegalEntities } from './aiService';
+
+// --- Intent Tunnel Adapter ---
+/**
+ * Bridges the gap between heuristic analysis and AI-powered "Intent Tunnel" extraction.
+ * Uses the Intent Tunnel to find dates and references that regex might miss or misinterpret.
+ */
+export class IntentTunnelAdapter {
+    async extract(text: string, apiKey: string): Promise<{ dates: ExtractedDate[], references: DocumentReference[] }> {
+        if (!apiKey) return { dates: [], references: [] };
+
+        const aiResult = await extractLegalEntities(text, apiKey);
+        
+        const dates: ExtractedDate[] = aiResult.dates.map((d: any) => ({
+            date: new Date(d.date_normalized),
+            text: d.text,
+            context: d.context,
+            type: d.type,
+            location: { start: 0, end: 0 }, // AI doesn't return exact indices easily, fallback to 0
+            source: 'ai'
+        }));
+
+        const references: DocumentReference[] = aiResult.references.map((r: any) => ({
+            text: r.text,
+            year: r.year,
+            documentType: r.documentType,
+            location: { start: 0, end: 0 },
+            source: 'ai'
+        }));
+
+        return { dates, references };
+    }
+}
 
 // --- Date Extractor ---
 export class DateExtractor {
@@ -32,7 +65,8 @@ export class DateExtractor {
             text: dateStr,
             context,
             type,
-            location: { start: match.index, end: match.index + dateStr.length }
+            location: { start: match.index, end: match.index + dateStr.length },
+            source: 'regex'
           });
         }
       }
@@ -282,7 +316,8 @@ export class ReferenceExtractor {
           text: refText,
           year: this.extractYear(refText),
           documentType: this.extractDocumentType(refText),
-          location: { start: match.index, end: match.index + refText.length }
+          location: { start: match.index, end: match.index + refText.length },
+          source: 'regex'
         });
       }
     }
@@ -407,10 +442,13 @@ export class LegalAnalyzer {
   private integrityChecker = new IntegrityChecker();
   private signatureExtractor = new SignatureExtractor();
   private completenessChecker = new CompletenessChecker();
+  private intentTunnel = new IntentTunnelAdapter();
 
+  /**
+   * Standard Synchronous Analysis (Heuristics only)
+   */
   analyze(document: { id: string; content: string; documentType: string }, allDocs?: StoredDocument[]): LegalAnalysisResult {
     const dates = this.dateExtractor.extract(document.content);
-    // TEMPORAL CONSTRAINT CHECKING IMPLEMENTED HERE
     const temporalViolations = this.constraintChecker.check(dates);
     
     const references = this.referenceExtractor.extract(document.content);
@@ -434,7 +472,64 @@ export class LegalAnalyzer {
       signatures,
       violations: allViolations,
       criticalCount: allViolations.filter(v => v.severity === 'critical').length,
-      timestamp: new Date()
+      timestamp: new Date(),
+      isAiAugmented: false
     };
+  }
+
+  /**
+   * Asynchronous Analysis utilizing Intent Tunnel (AI) for deep extraction.
+   * Merges Heuristic results with AI results.
+   */
+  async analyzeWithIntentTunnel(document: { id: string; content: string; documentType: string }, apiKey: string, allDocs?: StoredDocument[]): Promise<LegalAnalysisResult> {
+      // 1. Run basic heuristics
+      const baseResult = this.analyze(document, allDocs);
+
+      // 2. Run Intent Tunnel Extraction
+      const aiExtraction = await this.intentTunnel.extract(document.content, apiKey);
+
+      // 3. Merge Results (Deduplicate)
+      
+      // Merge Dates
+      const mergedDates = [...baseResult.dates];
+      for (const aiDate of aiExtraction.dates) {
+          // Check if date already exists (fuzzy match on date object)
+          const exists = mergedDates.some(d => d.date.getTime() === aiDate.date.getTime() && d.type === aiDate.type);
+          if (!exists) {
+              mergedDates.push(aiDate);
+          }
+      }
+      // Re-sort
+      mergedDates.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      // Merge References
+      const mergedRefs = [...baseResult.references];
+      for (const aiRef of aiExtraction.references) {
+          const exists = mergedRefs.some(r => r.text.includes(aiRef.text) || aiRef.text.includes(r.text));
+          if (!exists) {
+              mergedRefs.push(aiRef);
+          }
+      }
+
+      // 4. Re-run Constraints on ENRICHED data
+      // This is the key value add: new dates might trigger new violations
+      const temporalViolations = this.constraintChecker.check(mergedDates);
+      const signatureViolations = this.completenessChecker.check(document.documentType, baseResult.signatures); // Signatures still heuristic for now
+      
+      // We keep old ref violations unless we re-run integrity checker, but integrity checker uses Regex extractor internally.
+      // Ideally we'd update integrity checker to accept passed references, but for now we'll concatenate.
+      // (Simplified logic: assuming AI refs don't trigger graph violations yet without corpus update)
+      const baseViolationsWithoutTemporal = baseResult.violations.filter(v => !['jurat_future_check', 'jurat_before_filing', 'signature_before_filing', 'service_before_hearing', 'service_timing_impossible', 'service_insufficient_notice'].includes(v.constraintId));
+      
+      const allViolations = [...baseViolationsWithoutTemporal, ...temporalViolations, ...signatureViolations];
+
+      return {
+          ...baseResult,
+          dates: mergedDates,
+          references: mergedRefs,
+          violations: allViolations,
+          criticalCount: allViolations.filter(v => v.severity === 'critical').length,
+          isAiAugmented: true
+      };
   }
 }

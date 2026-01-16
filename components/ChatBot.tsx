@@ -309,7 +309,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
                     },
-                    systemInstruction: { parts: [{ text: systemInstruction }]},
+                    // Pass systemInstruction as string, not object
+                    systemInstruction: systemInstruction,
                     // Enable transcription to display chat bubbles (Empty object enables it, do not pass model name here)
                     inputAudioTranscription: {}, 
                     outputAudioTranscription: {} 
@@ -426,6 +427,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                         // Provide user feedback if detailed error available
                         if (e instanceof ErrorEvent && e.message) {
                              alert(`Live Session Error: ${e.message}`);
+                        } else {
+                             alert("Live Session Error: The service is currently unavailable or the connection was rejected.");
                         }
                     }
                 }
