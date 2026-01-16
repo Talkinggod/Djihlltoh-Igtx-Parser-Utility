@@ -1,13 +1,13 @@
 
-
 import React, { useRef, useState } from 'react';
-import { Upload, Edit3, Settings2, BookOpen, Zap, Loader2, FileText, Info } from 'lucide-react';
+import { Upload, Edit3, Settings2, BookOpen, Zap, Loader2, FileText, Info, Image as ImageIcon } from 'lucide-react';
 import { Card, CardHeader, CardFooter, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { cn } from '../lib/utils';
 import { extractTextFromPdf } from '../services/pdfExtractor';
+import { analyzeImage } from '../services/aiService';
 import { LanguageProfile, IGTXSource, UILanguage, PdfTextDiagnostics, ParserDomain, GoogleUser, CustomRule } from '../types';
 import { translations } from '../services/translations';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
@@ -51,12 +51,36 @@ export const InputSection: React.FC<InputSectionProps> = ({
         if (file.type === 'application/pdf') {
             const res = await extractTextFromPdf(file);
             setInput(res.text);
+        } else if (file.type.startsWith('image/')) {
+            if (!apiKey) {
+                alert("Please enter your Gemini API Key to analyze images.");
+                return;
+            }
+            const analysis = await analyzeImage(file, apiKey);
+            setInput(analysis);
         } else {
             const text = await file.text();
             setInput(text);
         }
-    } catch (e) {
-        console.error(e);
+    } catch (e: any) {
+        console.error("File Processing Error:", e);
+        let msg = e.message || "Unknown error";
+        
+        // Friendly Error Mapping
+        if (msg.includes("SECURE_PDF")) {
+            msg = "This PDF is password protected. Please remove the password protection (e.g. 'Print to PDF') and try uploading again.";
+        } else if (msg.includes("CORRUPTED_PDF")) {
+            msg = "The file appears to be corrupted or not a valid PDF document.";
+        } else if (msg.includes("EMPTY_PDF")) {
+            msg = "The PDF file appears to be empty.";
+        } else if (msg.includes("OCR_ENGINE_ERROR")) {
+            msg = "OCR Engine Failed: The system could not initialize the text recognition engine. This usually happens due to network restrictions blocking the language model download. Please check your internet connection.";
+        } else if (msg.includes("ENGINE_LOAD_ERROR")) {
+            msg = "Could not load the PDF Processing Engine. Check your internet connection (PDF.js script failed to load).";
+        }
+        
+        alert(`Failed to process ${file.name}:\n\n${msg}`);
+        setFileName(null);
     } finally {
         setIsLoadingFile(false);
     }
@@ -113,9 +137,18 @@ export const InputSection: React.FC<InputSectionProps> = ({
             </div>
         )}
 
+        {isLoadingFile && (
+            <div className="absolute inset-0 bg-background/50 z-10 flex items-center justify-center backdrop-blur-sm">
+                <div className="bg-card border p-4 rounded-lg shadow-xl flex flex-col items-center gap-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    <span className="text-sm font-semibold">Processing Artifact...</span>
+                </div>
+            </div>
+        )}
+
         <textarea
             className="flex-1 w-full bg-transparent p-6 text-sm font-mono text-foreground resize-none focus:outline-none leading-relaxed placeholder:text-muted-foreground/30 whitespace-pre-wrap overflow-auto custom-scrollbar"
-            placeholder="// Enter linguistic object for structural measurement..."
+            placeholder="// Enter linguistic object, upload PDF, or attach image for structural measurement..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             spellCheck={false}
@@ -134,7 +167,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
           Upload Artifact
         </Button>
         <input 
-            type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt"
+            type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp"
             onChange={(e) => e.target.files?.[0] && handleFileChange(e.target.files[0])}
         />
 

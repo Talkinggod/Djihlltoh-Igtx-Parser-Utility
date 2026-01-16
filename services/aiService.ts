@@ -1,15 +1,61 @@
 
-
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { ParseReport, ParserDomain, AIPrivileges, CaseState, ViabilityAssessment, LegalBenchResult, LegalBenchTaskType } from "../types";
+import { ParseReport, ParserDomain, AIPrivileges, CaseState, ViabilityAssessment, LegalBenchResult, LegalBenchTaskType, Claim } from "../types";
 import { DocumentTypeService } from "./documentTypeService";
 
 const BATCH_SIZE = 5;
 
-// Tool to write to the "Drafting" tab
+// Helper for Base64
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+        let encoded = reader.result as string;
+        // Remove data url prefix
+        encoded = encoded.split(',')[1];
+        resolve(encoded);
+    };
+    reader.onerror = error => reject(error);
+  });
+};
+
+/**
+ * Analyzes an image using Gemini Pro Vision capabilities.
+ * Useful for OCR of handwritten notes, evidence photos, or scanned diagrams.
+ */
+export async function analyzeImage(file: File, apiKey: string): Promise<string> {
+    const ai = new GoogleGenAI({ apiKey });
+    const base64Data = await fileToBase64(file);
+    
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: {
+            parts: [
+                { inlineData: { mimeType: file.type, data: base64Data } },
+                { text: "Analyze this image. If it contains text, transcribe it exactly. If it is a scene or object, describe it in detail relevant for legal or linguistic analysis." }
+            ]
+        }
+    });
+    return response.text || "";
+}
+
+/**
+ * Refines draft text using Gemini Flash for speed.
+ */
+export async function refineDraft(text: string, instruction: string, apiKey: string): Promise<string> {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Original Text: "${text}"\n\nInstruction: ${instruction}\n\nOutput the processed text only. Do not add conversational filler.`
+    });
+    return response.text || text;
+}
+
+// Tool to write to the "Drafting" tab (Updates current)
 export const writeDraftTool: FunctionDeclaration = {
     name: "write_draft",
-    description: "Writes or overwrites text in the Drafting/Composition Editor. Use this when the user asks you to draft, compose, write, or generate a legal document, email, or template.",
+    description: "Writes or overwrites text in the CURRENT active draft in the Composition Editor. Use this for refining or editing the open document.",
     parameters: {
         type: Type.OBJECT,
         properties: {
@@ -19,6 +65,20 @@ export const writeDraftTool: FunctionDeclaration = {
             }
         },
         required: ["content"]
+    }
+};
+
+// Tool to create a NEW draft
+export const createNewDraftTool: FunctionDeclaration = {
+    name: "create_new_draft",
+    description: "Creates a NEW, separate document in the Drafts list. Use this when the user asks to create a distinct document (e.g. 'Draft a Motion AND an Affidavit').",
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            title: { type: Type.STRING, description: "Title of the new document (e.g. 'Affidavit of Service')." },
+            content: { type: Type.STRING, description: "The content of the new document." }
+        },
+        required: ["title", "content"]
     }
 };
 
@@ -113,9 +173,16 @@ export async function sendChatMessage(
         CORE RESPONSIBILITIES:
         1. **Exhibit Preparation**: You are responsible for "Marking for Identification". When a user asks to mark evidence, use the 'mark_exhibit' tool. Adhere to standard conventions (Plaintiff = Numbers, Defendant = Letters, or as requested).
         2. **Evidence Analysis**: You analyze documents for *Relevance*, *Temporal Significance*, and *Legal Implication*. Use 'tag_evidence' to attach metadata to documents.
-        3. **Pipeline Awareness**: Be aware of the case status. If a deadline is approaching (based on context), prioritize evidence that supports the immediate filing.
-        4. **Outcome Centered**: Focus on how a document proves or disproves a specific Cause of Action (IRAC Method).
-        5. **SKEPTIC MODE**: When analyzing contracts (Leases, Licenses, Occupancy Agreements, etc.), assume the role of a skeptical auditor. Flag ambiguities, missing definitions, one-sided terms, and statutory conflicts (e.g., Mitchell-Lama rules, Rent Stabilization).
+        3. **Drafting & Composition**: You create legal documents. 
+           - Use 'create_new_draft' when starting a NEW document (e.g., creating a separate Affidavit, Notice, or Motion).
+           - Use 'write_draft' to edit the currently open document.
+        4. **Pipeline Awareness**: Be aware of the case status. If a deadline is approaching (based on context), prioritize evidence that supports the immediate filing.
+        5. **Outcome Centered**: Focus on how a document proves or disproves a specific Cause of Action (IRAC Method).
+        6. **SKEPTIC MODE**: When analyzing contracts (Leases, Licenses, Occupancy Agreements, etc.), assume the role of a skeptical auditor. Flag ambiguities, missing definitions, one-sided terms, and statutory conflicts (e.g., Mitchell-Lama rules, Rent Stabilization).
+        7. **Semantic Coherence Analyst**: You have access to "Linguistic Physics" metrics (Lambda, Kappa, R²). 
+           - Use 'Lambda' (λ) to judge the structural coherence of a pleading or contract. High Lambda (>0.1) suggests a "Flight of Ideas" or poorly drafted argument. Low Lambda (<0.02) implies strong, persistent topical focus.
+           - Use 'R²' to determine if the document has a consistent logical flow. R² < 0.8 suggests the text is disjointed or assembled from unrelated parts.
+           - If a document has low coherence metrics, flag it as potentially "vulnerable to dismissal" or "ambiguous".
         
         TONE: Professional, procedural, and precise.
         `;
@@ -134,7 +201,7 @@ export async function sendChatMessage(
         systemInstruction += `\n\n=== CASE CONTEXT & DOCUMENTS ===\n${contextData}`;
     }
 
-    const tools: any[] = [{ functionDeclarations: [writeDraftTool, writeEditorTool, markExhibitTool, tagEvidenceTool] }];
+    const tools: any[] = [{ functionDeclarations: [writeDraftTool, createNewDraftTool, writeEditorTool, markExhibitTool, tagEvidenceTool] }];
     
     if (privileges?.allowWebSearch) {
         tools.push({ googleSearch: {} });
@@ -191,6 +258,87 @@ export async function sendChatMessage(
 }
 
 /**
+ * Detects potential legal claims/causes of action from case context.
+ */
+export async function detectPotentialClaims(caseData: CaseState, apiKey: string): Promise<Claim[]> {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    // Build context
+    const context = `
+    Case Name: ${caseData.name}
+    Case Type: ${caseData.caseMeta.type}
+    Plaintiff: ${caseData.caseMeta.plaintiffs.join(', ')}
+    Defendant: ${caseData.caseMeta.defendants.join(', ')}
+    
+    Recent Documents:
+    ${caseData.documents.slice(0, 5).map(d => `- ${d.name} (${d.category}): ${d.content.slice(0, 300)}...`).join('\n')}
+    
+    User Input:
+    ${caseData.input}
+    `;
+
+    const prompt = `Analyze the provided case context and documents. Identify potential legal Causes of Action (Claims) or Defenses that may apply.
+    
+    For each potential claim, provide:
+    1. Title (e.g. "Breach of Contract", "Unjust Enrichment")
+    2. Description (Why it applies based on facts)
+    3. Likelihood (0-100 estimate of relevance)
+    4. Relevant document names (if any)
+    
+    Return a structured object.`;
+
+    const schema = {
+        type: Type.OBJECT,
+        properties: {
+            claims: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        title: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        likelihood: { type: Type.NUMBER },
+                        evidence: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    }
+                }
+            }
+        }
+    };
+
+    try {
+        // Use Flash for speed and reliability on simple extraction
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt + "\n\n" + context,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: schema
+            }
+        });
+
+        const text = response.text;
+        if (!text) throw new Error("Empty response from AI");
+        
+        const result = JSON.parse(text);
+        const rawClaims = result.claims || [];
+
+        return rawClaims.map((c: any) => ({
+            id: Date.now().toString() + Math.random().toString(36).substr(2,5),
+            title: c.title,
+            description: c.description,
+            likelihood: c.likelihood,
+            status: 'potential',
+            evidenceRefs: c.evidence, // Just strings for now, mapping logic handled in UI
+            detectedAt: new Date().toISOString()
+        }));
+
+    } catch(e: any) {
+        console.error("Claim detection failed", e);
+        throw e; // Propagate error so UI can handle it
+    }
+}
+
+/**
  * Enriches the ParseReport with Semantic State (Stage 2/3) data using Gemini.
  */
 export async function enrichReportWithSemantics(
@@ -219,14 +367,16 @@ export async function enrichReportWithSemantics(
             const enrichedBatch = await processBatch(currentBatch, apiKey, domain, docTypeDef);
             for (let j = 0; j < enrichedBatch.length; j++) {
                 const globalIndex = i + j;
-                enrichedBlocks[globalIndex] = enrichedBatch[j];
-                if (enrichedIgtxBlocks[globalIndex]) {
-                    enrichedIgtxBlocks[globalIndex] = {
-                        ...enrichedIgtxBlocks[globalIndex],
-                        semantic_state: enrichedBatch[j].semantic_state,
-                        legal_state: enrichedBatch[j].legal_state,
-                        integrity: { ...enrichedIgtxBlocks[globalIndex].integrity, ai_enrichment: "gemini-3-pro-preview" } as any
-                    };
+                if (enrichedBatch[j]) {
+                    enrichedBlocks[globalIndex] = { ...enrichedBlocks[globalIndex], ...enrichedBatch[j] };
+                    if (enrichedIgtxBlocks[globalIndex]) {
+                        enrichedIgtxBlocks[globalIndex] = {
+                            ...enrichedIgtxBlocks[globalIndex],
+                            semantic_state: enrichedBatch[j].semantic_state,
+                            legal_state: enrichedBatch[j].legal_state,
+                            integrity: { ...enrichedIgtxBlocks[globalIndex].integrity, ai_enrichment: "gemini-3-pro-preview" } as any
+                        };
+                    }
                 }
             }
         } catch (error) { console.error(`Batch processing failed`, error); }
@@ -289,94 +439,58 @@ async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain,
         }}
     } } } } };
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `Input Blocks:\n${promptContext}\nReturn JSON array 'results'.`,
-        config: { temperature: 0, systemInstruction: systemInstruction, responseMimeType: "application/json", responseSchema: domain === 'legal' ? legalSchema : linguisticSchema }
-    });
+    const prompt = `Analyze the following text blocks based on the system instructions:\n\n${promptContext}`;
+    const activeSchema = domain === 'legal' ? legalSchema : linguisticSchema;
 
-    let rawText = response.text || "{\"results\": []}";
-    rawText = rawText.replace(/```json\n?|```/g, '').trim();
-    let json;
-    try { json = JSON.parse(rawText); } catch (e) { json = { results: [] }; }
-    const results = json.results || [];
-    const timestamp = new Date().toISOString();
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: prompt,
+            config: {
+                systemInstruction: systemInstruction,
+                responseMimeType: "application/json",
+                responseSchema: activeSchema,
+                tools: [{ googleSearch: {} }] // Enable grounding
+            }
+        });
 
-    return blocks.map((block, idx) => {
-        const result = results[idx] || {};
-        if (domain === 'legal') {
-            return { 
-                ...block, 
-                legal_state: { 
-                    parties: result.parties || [], 
-                    case_meta: result.case_meta || {}, 
-                    legal_points: result.legal_points || [], 
-                    foundational_docs: result.foundational_docs || [], 
-                    logic_trace: result.logic_trace || [], 
-                    contract_analysis: result.contract_analysis || null,
-                    provenance: { source: 'ai', model: "gemini-3-pro-preview", generated_at: timestamp } 
-                } 
-            };
-        } else {
-            return { ...block, semantic_state: { predicate: result.predicate || null, arguments: result.arguments || [], features: result.features || {}, provenance: { source: 'ai', model: "gemini-3-pro-preview", generated_at: timestamp } } };
-        }
-    });
+        const text = response.text || "{}";
+        const result = JSON.parse(text);
+        return result.results || [];
+    } catch (e) {
+        console.error("Batch processing failed", e);
+        return [];
+    }
 }
 
-/**
- * Generates a comprehensive "Balance of Equities" & Viability Assessment for the entire case.
- */
 export async function generateViabilityAssessment(caseData: CaseState, apiKey: string): Promise<ViabilityAssessment> {
     const ai = new GoogleGenAI({ apiKey });
-
-    // Prepare Context from Case Documents
-    const documentContext = caseData.documents
-        .slice(0, 10) // Limit to first 10 docs to fit context window comfortably
-        .map(d => `Document [${d.category || d.type}] "${d.name}":\n${d.content.slice(0, 3000)}...`) // Truncate content
-        .join("\n\n---\n\n");
-
-    const systemInstruction = `You are a Senior Litigation Strategist and Judicial Clerk.
     
-    Your task is to perform a "Case Viability Assessment" and "Balance of Equities" analysis based on the provided case files.
-    
-    You must be PRAGMATIC, CYNICAL, and REALISTIC. Do not just recite the law; evaluate the *likelihood of winning*.
-    
-    Assess the following Core Factors:
-    1. **Factual & Evidentiary Strength**: Quantity/Quality of proof. Is it hearsay or hard evidence?
-    2. **Legal Analysis**: Do the facts fit the elements of the Cause of Action? Precedent strength?
-    3. **Liability & Causation**: Is fault clear? Is the link to damages direct?
-    4. **Opponent's Case**: Strength of defenses (Comparative negligence, Statute of Limitations, etc.).
-    5. **Judicial & Venue Factors**: Considering the jurisdiction (if known), are there biases?
-    6. **Damages**: Severity and provability.
-    
-    Output a numeric score (0-100) for each factor, where 0 is fatal weakness and 100 is slam-dunk.
-    Calculate an OVERALL Probability of Success (0-100%).
-    
-    Finally, produce a "Balance of Equities" list:
-    - Plaintiff Equities: Factors making it fair/just for Plaintiff to win.
-    - Defendant Equities: Factors making it fair/just for Defendant to win.
-    
-    Use Google Search grounding to verify specific statutes or venue tendencies if mentioned.`;
-
-    const prompt = `Case Name: ${caseData.name}
-    Case Type: ${caseData.caseMeta.type}
+    // Construct context from case data
+    const context = `Case Name: ${caseData.name}
     Jurisdiction: ${caseData.caseMeta.jurisdiction}
+    Type: ${caseData.caseMeta.type}
     
-    CASE DOCUMENTS:
-    ${documentContext}
+    Key Documents:
+    ${caseData.documents.map(d => `- ${d.name} (${d.type}): ${d.content.slice(0, 500)}...`).join('\n')}
     
-    Generate the Viability Assessment JSON.`;
+    User Input Notes:
+    ${caseData.input}
+    `;
+
+    const prompt = `Analyze the viability of this case. Provide a probability score (0-100), identify key factors (strengths/weaknesses), and balance the equities.`;
 
     const schema = {
         type: Type.OBJECT,
         properties: {
-            overall_probability: { type: Type.NUMBER, description: "0 to 100 integer representing win chance." },
+            overall_probability: { type: Type.NUMBER },
+            executive_summary: { type: Type.STRING },
             factors: {
                 type: Type.ARRAY,
                 items: {
                     type: Type.OBJECT,
                     properties: {
-                        category: { type: Type.STRING, enum: ['factual_strength', 'legal_basis', 'liability_causation', 'damages', 'opponent_position', 'judicial_venue'] },
+                        category: { type: Type.STRING },
                         score: { type: Type.NUMBER },
                         rationale: { type: Type.STRING },
                         key_strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -384,14 +498,59 @@ export async function generateViabilityAssessment(caseData: CaseState, apiKey: s
                     }
                 }
             },
-            executive_summary: { type: Type.STRING },
             balance_of_equities: {
                 type: Type.OBJECT,
                 properties: {
                     plaintiff_equities: { type: Type.ARRAY, items: { type: Type.STRING } },
                     defendant_equities: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    conclusion: { type: Type.STRING, description: "Who holds the equitable advantage?" }
+                    conclusion: { type: Type.STRING }
                 }
+            },
+            generated_at: { type: Type.STRING }
+        }
+    };
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: prompt + "\n\n" + context,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: schema
+        }
+    });
+
+    const text = response.text || "{}";
+    const result = JSON.parse(text);
+    return {
+        ...result,
+        generated_at: new Date().toISOString()
+    };
+}
+
+export async function runLegalBenchTask(task: LegalBenchTaskType, inputs: { text: string, hypothesis?: string, context?: string }, apiKey: string): Promise<LegalBenchResult> {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    let prompt = `Task: ${task}\nText: "${inputs.text}"`;
+    if (inputs.hypothesis) prompt += `\nHypothesis/Question: "${inputs.hypothesis}"`;
+    if (inputs.context) prompt += `\nContext: "${inputs.context}"`;
+
+    const systemInstruction = `You are an expert legal analyst performing the '${task}' task from the LegalBench benchmark.
+    Analyze the input and provide a conclusion, reasoning, and confidence score.`;
+
+    const schema = {
+        type: Type.OBJECT,
+        properties: {
+            task: { type: Type.STRING },
+            conclusion: { type: Type.STRING },
+            reasoning: { type: Type.STRING },
+            confidence: { type: Type.NUMBER },
+            citations: { type: Type.ARRAY, items: { type: Type.STRING } },
+            extracted_clauses: { 
+                type: Type.ARRAY, 
+                items: { 
+                    type: Type.OBJECT, 
+                    properties: { type: { type: Type.STRING }, text: { type: Type.STRING } } 
+                } 
             }
         }
     };
@@ -404,277 +563,15 @@ export async function generateViabilityAssessment(caseData: CaseState, apiKey: s
                 systemInstruction: systemInstruction,
                 responseMimeType: "application/json",
                 responseSchema: schema,
-                tools: [{ googleSearch: {} }] // Enable grounding for legal research
+                tools: [{ googleSearch: {} }]
             }
         });
 
         const text = response.text || "{}";
         const result = JSON.parse(text);
-        
-        return {
-            ...result,
-            generated_at: new Date().toISOString()
-        };
-
-    } catch (error) {
-        console.error("Viability Assessment Failed", error);
-        throw new Error("Failed to generate assessment. Ensure API Key is valid and documents contain text.");
-    }
-}
-
-/**
- * Runs specific LegalBench-inspired tasks (Hearsay, ContractNLI, etc.)
- */
-export async function runLegalBenchTask(
-    task: LegalBenchTaskType,
-    inputs: { text: string, context?: string, hypothesis?: string },
-    apiKey: string
-): Promise<LegalBenchResult> {
-    const ai = new GoogleGenAI({ apiKey });
-    
-    let prompt = "";
-    let systemInstruction = "";
-    let responseSchema: any = {
-        type: Type.OBJECT,
-        properties: {
-            task: { type: Type.STRING },
-            conclusion: { type: Type.STRING },
-            reasoning: { type: Type.STRING },
-            confidence: { type: Type.NUMBER },
-            citations: { type: Type.ARRAY, items: { type: Type.STRING } }
-        }
-    };
-    
-    // --- TASK CONFIGURATION ---
-    if (task === 'hearsay') {
-        systemInstruction = `You are an expert on the Federal Rules of Evidence (FRE). 
-        Task: Determine if the provided evidence is Hearsay.
-        1. Is it an out-of-court statement?
-        2. Is it offered to prove the truth of the matter asserted?
-        3. Does a specific exception (FRE 803/804) apply?
-        
-        Output 'Admissible' or 'Inadmissible Hearsay' as the conclusion.`;
-        prompt = `Evidence: "${inputs.text}"\nContext: ${inputs.context || "None"}\n\nAnalyze hearsay status.`;
-    } 
-    else if (task === 'contract_nli') {
-        systemInstruction = `You are a Contract Logic Engine. Perform Natural Language Inference (NLI).
-        Premise: The Contract Text.
-        Hypothesis: The User's Question/Assertion.
-        
-        Determine the relationship:
-        - Entailment: The hypothesis is definitely true given the contract.
-        - Contradiction: The hypothesis is definitely false.
-        - Neutral: The contract does not address this or it is ambiguous.
-        
-        Be strict.`;
-        prompt = `Contract Text: "${inputs.text}"\nHypothesis: "${inputs.hypothesis}"\n\nDetermine Entailment/Contradiction/Neutral.`;
-    }
-    else if (task === 'abercrombie') {
-        systemInstruction = `You are a Trademark Law Expert. Classify the term on the Abercrombie spectrum of distinctiveness.
-        Spectrum: Generic, Descriptive, Suggestive, Arbitrary, Fanciful.`;
-        prompt = `Term: "${inputs.text}"\nContext/Goods: ${inputs.context}\n\nClassify distinctiveness.`;
-    }
-    else if (task === 'rule_application') {
-        systemInstruction = `You are a Pro Se Legal Assistant. Apply the law to the facts.
-        Format: IRAC (Issue, Rule, Application, Conclusion).
-        Cite specific rules (FRCP, CPLR) if applicable.`;
-        prompt = `Facts: "${inputs.text}"\nIssue/Question: ${inputs.hypothesis || "Does this meet the legal standard?"}\n\nAnalyze.`;
-    }
-    else if (task === 'case_hold') {
-        systemInstruction = `You are a Legal Scholar specializing in Case Law Holdings.
-        Task: Analyze the provided case text or summary.
-        1. Identify the 'Holding' - the specific rule of law established.
-        2. Distinguish it from 'Dicta'.
-        3. Explain the reasoning.
-        
-        Output the Holding as the Conclusion.`;
-        prompt = `Case Text: "${inputs.text}"\n\nIdentify the HOLDING.`;
-    }
-    else if (task === 'proa') {
-        systemInstruction = `You are a Statutory Analyst.
-        Task: Determine if the provided statute contains a Private Right of Action (PROA).
-        Does it explicitly or implicitly allow a private individual to sue? Or is enforcement reserved for the government?
-        
-        Output 'PROA Exists' or 'No PROA' as the conclusion.`;
-        prompt = `Statute: "${inputs.text}"\n\nAnalyze for Private Right of Action.`;
-    }
-    // --- CUAD Extraction (Contract Understanding) ---
-    else if (task === 'cuad_extraction') {
-        systemInstruction = `You are a Contract Reviewer trained on the CUAD (Contract Understanding Atticus Dataset) schema.
-        Task: Scan the provided contract text and extract specific clauses defined in CUAD.
-        
-        Categories to detect:
-        - Termination for Convenience
-        - Governing Law
-        - Jurisdiction
-        - Anti-Assignment
-        - Intellectual Property (IP)
-        - Force Majeure
-        - Non-Compete
-        
-        Output a list of clauses with the EXACT text span found.`;
-        prompt = `Contract Text: "${inputs.text}"\n\nExtract key CUAD clauses.`;
-        
-        responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-                task: { type: Type.STRING },
-                conclusion: { type: Type.STRING },
-                extracted_clauses: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            type: { type: Type.STRING },
-                            text: { type: Type.STRING, description: "Verbatim quote of the clause." }
-                        }
-                    }
-                },
-                confidence: { type: Type.NUMBER },
-                reasoning: { type: Type.STRING }
-            }
-        };
-    }
-    // --- LegalBench-RAG (Precise Retrieval) ---
-    else if (task === 'citation_retrieval') {
-        systemInstruction = `You are a Legal Search Engine complying with LegalBench-RAG protocols.
-        Task: Precision Retrieval.
-        Goal: Retrieve the EXACT text span (verbatim quote) from the corpus that answers the query.
-        
-        Constraint: Do NOT paraphrase. Do NOT summarize. Return only the quote(s) that directly address the question.
-        If no relevant text is found, state that.
-        
-        Output the found quote(s) in the 'extracted_clauses' array.`;
-        prompt = `Corpus: "${inputs.text}"\nQuery: "${inputs.hypothesis}"\n\nFind exact citations.`;
-        
-        responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-                task: { type: Type.STRING },
-                conclusion: { type: Type.STRING, description: "Found / Not Found" },
-                extracted_clauses: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            type: { type: Type.STRING, description: "Label (e.g. 'Relevant Span')" },
-                            text: { type: Type.STRING, description: "The exact citation." }
-                        }
-                    }
-                },
-                confidence: { type: Type.NUMBER },
-                reasoning: { type: Type.STRING }
-            }
-        };
-    }
-    // --- LexGLUE: Unfair ToS ---
-    else if (task === 'unfair_tos') {
-        systemInstruction = `You are a Consumer Protection Lawyer trained on the LexGLUE UNFAIR-ToS dataset.
-        Task: Analyze the Terms of Service (ToS) or Contract for unfair, voidable, or abusive terms.
-        
-        Categories to Flag:
-        - Limitation of Liability (Excessive)
-        - Unilateral Change (Provider can change terms without notice)
-        - Content Removal (Provider can delete data without reason)
-        - Contract by Acceptance (Browsewrap)
-        - Choice of Law / Forum Selection (Inconvenient venue)
-        - Arbitration (Mandatory binding arbitration)
-        - Unilateral Termination
-        
-        Extract the unfair clauses verbatim.`;
-        prompt = `Terms of Service: "${inputs.text}"\n\nIdentify UNFAIR terms.`;
-        
-        responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-                task: { type: Type.STRING },
-                conclusion: { type: Type.STRING },
-                extracted_clauses: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            type: { type: Type.STRING, description: "Type of unfairness (e.g. 'Arbitration')" },
-                            text: { type: Type.STRING, description: "The clause text." }
-                        }
-                    }
-                },
-                confidence: { type: Type.NUMBER },
-                reasoning: { type: Type.STRING }
-            }
-        };
-    }
-    // --- LexGLUE: LEDGAR (Provision Classification) ---
-    else if (task === 'ledgar_classification') {
-        systemInstruction = `You are a Legal Taxonomist trained on the LexGLUE LEDGAR dataset.
-        Task: Classify the provided contract provision (paragraph) into one of the standard LEDGAR categories.
-        
-        Examples: Adjustments, Amendments, Assignments, Confidentiality, Counterparts, Entire Agreement, Expenses, Governing Law, Indemnification, Notices, Severability, Survival, Termination, Waivers.
-        
-        Return the single most accurate classification label.`;
-        prompt = `Provision Text: "${inputs.text}"\n\nClassify this provision.`;
-        
-        // Simple schema for classification
-    }
-    // --- BigLaw Bench: SPA Extraction ---
-    else if (task === 'spa_extraction') {
-        systemInstruction = `You are a Senior M&A Associate trained on the BigLaw Bench SPA (Share Purchase Agreement) dataset.
-        Task: Extract key economic and legal deal points from the SPA text.
-        
-        Extract:
-        - Purchase Price (Amount & Adjustments)
-        - Working Capital Target
-        - Indemnification Cap / Basket / Deductible
-        - Survival Period (General vs Fundamental Reps)
-        - Governing Law
-        - Closing Date
-        
-        Format extraction as a list of key-value pairs in 'extracted_clauses'.`;
-        prompt = `SPA Text: "${inputs.text}"\n\nExtract Deal Points.`;
-        
-        responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-                task: { type: Type.STRING },
-                conclusion: { type: Type.STRING, description: "Summary of Deal" },
-                extracted_clauses: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            type: { type: Type.STRING, description: "Deal Point Name (e.g. 'Purchase Price')" },
-                            text: { type: Type.STRING, description: "The value/clause found." }
-                        }
-                    }
-                },
-                confidence: { type: Type.NUMBER },
-                reasoning: { type: Type.STRING }
-            }
-        };
-    }
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
-            contents: prompt,
-            config: {
-                systemInstruction: systemInstruction,
-                responseMimeType: "application/json",
-                responseSchema: responseSchema,
-                tools: [{ googleSearch: {} }] // Enable grounding
-            }
-        });
-
-        const text = response.text || "{}";
-        const result = JSON.parse(text);
-        
-        return {
-            ...result,
-            task: task // Ensure task matches input
-        };
-
-    } catch (error) {
-        console.error("LegalBench Task Failed", error);
-        throw new Error("Analysis failed.");
+        return { ...result, task }; // Ensure task is correct
+    } catch (e) {
+        console.error("LegalBench task failed", e);
+        throw e;
     }
 }

@@ -1,5 +1,4 @@
 
-
 import { PdfTextDiagnostics } from '../types';
 
 interface TextItem {
@@ -49,9 +48,12 @@ async function getOCRWorker(lang: string = 'eng') {
         currentWorker = worker;
         currentWorkerLang = lang;
         return worker;
-    } catch (error) {
+    } catch (error: any) {
         console.error("Failed to load Tesseract:", error);
-        throw error;
+        if (error.message && (error.message.includes('Network error') || error.message.includes('Failed to fetch'))) {
+             throw new Error("Network error downloading OCR language data. Check internet connection.");
+        }
+        throw new Error(`OCR Initialization Failed: ${error.message || "Unknown error"}`);
     }
 }
 
@@ -61,11 +63,13 @@ async function getOCRWorker(lang: string = 'eng') {
  * @param file The PDF file
  * @param onProgress Callback for progress
  * @param langCode 3-letter OCR language code (e.g. 'eng', 'chi_sim', 'ara')
+ * @param forceOcr If true, ignores text layer and forces visual scan
  */
 export async function extractTextFromPdf(
   file: File, 
   onProgress?: (percent: number, status: string) => void,
-  langCode: string = 'eng'
+  langCode: string = 'eng',
+  forceOcr: boolean = false
 ): Promise<PdfExtractionResult> {
   let pdfDocument;
   let pdfjsLib: any;
@@ -87,7 +91,7 @@ export async function extractTextFromPdf(
           pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
       }
   } catch (e: any) {
-      throw new Error(`Failed to load PDF engine: ${e.message}. Check your internet connection.`);
+      throw new Error(`ENGINE_LOAD_ERROR: Failed to load PDF engine: ${e.message}. Check your internet connection.`);
   }
 
   if (onProgress) onProgress(0, "Loading PDF document...");
@@ -101,17 +105,17 @@ export async function extractTextFromPdf(
     });
     pdfDocument = await loadingTask.promise;
   } catch (error: any) {
-    let errorMessage = "Failed to load PDF file.";
+    console.error("PDF Load Error:", error);
     if (error.name === 'PasswordException') {
-      errorMessage = "The PDF is password protected. Please unlock it and try again.";
+      throw new Error("SECURE_PDF: The PDF is password protected.");
     } else if (error.name === 'InvalidPDFException') {
-      errorMessage = "The file appears to be a corrupted or invalid PDF.";
+      throw new Error("CORRUPTED_PDF: The file header is invalid.");
     } else if (error.name === 'MissingPDFException') {
-      errorMessage = "The PDF file is missing or empty.";
-    } else if (error.message) {
-      errorMessage = `PDF Load Error: ${error.message}`;
+      throw new Error("EMPTY_PDF: The PDF file appears to be empty.");
+    } else if (error.name === 'FormatError') {
+      throw new Error("FORMAT_ERROR: Invalid PDF structure.");
     }
-    throw new Error(errorMessage);
+    throw new Error(`PDF_LOAD_ERROR: ${error.message || "Unknown error"}`);
   }
   
   const numPages = pdfDocument.numPages;
@@ -122,7 +126,7 @@ export async function extractTextFromPdf(
   let fragmentedLines = 0;
   let hyphenBreaks = 0;
   let totalCharLength = 0;
-  let isOcrTriggered = false;
+  let isOcrTriggered = forceOcr;
 
   try {
     for (let i = 1; i <= numPages; i++) {
@@ -131,18 +135,32 @@ export async function extractTextFromPdf(
 
       try {
         const page = await pdfDocument.getPage(i);
-        const textContent = await page.getTextContent();
         const viewport = page.getViewport({ scale: 1.0 }); // Use 1.0 for geometry calcs
         
-        const totalTextLength = textContent.items.reduce((acc: number, item: any) => acc + item.str.length, 0);
-        const isScanned = textContent.items.length < 5 || totalTextLength < 30;
+        let shouldUseOcr = forceOcr;
 
-        if (isScanned) {
-          // --- OCR PATH (Scanned Documents) ---
-          isOcrTriggered = true;
+        if (!shouldUseOcr) {
+            const textContent = await page.getTextContent();
+            const totalTextLength = textContent.items.reduce((acc: number, item: any) => acc + item.str.length, 0);
+            // Heuristic: If page has very little text, assume it's an image scan
+            if (textContent.items.length < 5 || totalTextLength < 50) {
+                shouldUseOcr = true;
+                isOcrTriggered = true;
+            }
+        }
+
+        if (shouldUseOcr) {
+          // --- OCR PATH (Scanned Documents / Forced) ---
           if (onProgress) onProgress(currentProgress, `OCR Scanning page ${i} of ${numPages} (${langCode})...`);
 
-          const worker = await getOCRWorker(langCode);
+          // Critical: If getOCRWorker fails, we should abort the whole process, not just this page
+          // as it likely means language data can't be loaded.
+          let worker;
+          try {
+             worker = await getOCRWorker(langCode);
+          } catch (e: any) {
+             throw new Error(`OCR_ENGINE_ERROR: ${e.message}`);
+          }
 
           // Render high-res for OCR
           const renderViewport = page.getViewport({ scale: 2.0 });
@@ -196,6 +214,8 @@ export async function extractTextFromPdf(
         } else {
           // --- TEXT EXTRACTION PATH (Digital PDFs) ---
           if (onProgress) onProgress(currentProgress, `Extracting text from page ${i}...`);
+          
+          const textContent = await page.getTextContent();
           
           // Map PDF items
           const items: TextItem[] = textContent.items.map((item: any) => {
@@ -267,7 +287,6 @@ export async function extractTextFromPdf(
               const lineHeight = Math.max(prev.h, curr.h);
               
               // Check if on same line (Y-aligned)
-              // If 2-column, we already sorted so this naturally breaks when jumping columns
               const verticalDist = Math.abs(curr.y - prev.y);
               
               if (verticalDist < lineHeight * 0.6) { 
@@ -275,7 +294,10 @@ export async function extractTextFromPdf(
               } else {
                 // Flush line
                 const lineStr = assembleLine(currentLineItems);
-                pageLines.push(lineStr);
+                // Filter out empty lines or purely numeric margin lines (common in pleadings)
+                if (isValidLine(lineStr)) {
+                    pageLines.push(lineStr);
+                }
                 
                 // Update Diagnostics
                 if (lineStr.trim().length > 0) {
@@ -286,7 +308,7 @@ export async function extractTextFromPdf(
                 }
 
                 // Detect Semantic Paragraph Breaks
-                const gapY = curr.y - prev.y; // Positive because we flipped Y
+                const gapY = curr.y - prev.y; 
                 if (gapY > lineHeight * 1.8) {
                     pageLines.push(''); 
                 }
@@ -294,7 +316,7 @@ export async function extractTextFromPdf(
               }
             }
             const finalLine = assembleLine(currentLineItems);
-            pageLines.push(finalLine);
+            if (isValidLine(finalLine)) pageLines.push(finalLine);
             if (finalLine.trim().length > 0) {
                 totalLines++;
                 totalCharLength += finalLine.length;
@@ -305,6 +327,11 @@ export async function extractTextFromPdf(
         }
 
       } catch (pageError: any) {
+        // Rethrow critical OCR errors to top level
+        if (pageError.message && pageError.message.includes("OCR_ENGINE_ERROR")) {
+            throw pageError;
+        }
+        
         console.error(`Error processing page ${i}:`, pageError);
         fullText += `\n[SYSTEM WARNING: Failed to process content on Page ${i}. ${pageError.message}]\n\n`;
       }
@@ -314,11 +341,16 @@ export async function extractTextFromPdf(
       }
     }
   } catch (error: any) {
+    // If it's a known typed error from inner loops (OCR, PDF load), rethrow it
+    // otherwise wrap it as critical
+    if (error.message && (error.message.includes("OCR_ENGINE_ERROR") || error.message.includes("SECURE_PDF") || error.message.includes("CORRUPTED_PDF"))) {
+        throw error;
+    }
+    
     console.error("PDF Parsing Critical Error:", error);
     fullText += `\n[SYSTEM ERROR: Critical failure during processing. ${error instanceof Error ? error.message : String(error)}]`;
   }
   
-  // Fixed PdfTextDiagnostics initialization with correct property names
   const diagnostics: PdfTextDiagnostics = {
       totalLines,
       fragmentedLineRatio: totalLines > 0 ? fragmentedLines / totalLines : 0,
@@ -328,6 +360,17 @@ export async function extractTextFromPdf(
   };
 
   return { text: fullText, diagnostics };
+}
+
+/**
+ * Filter out common legal pleading noise (line numbers 1-28 on left margin)
+ */
+function isValidLine(text: string): boolean {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return false;
+    // Reject lines that are just numbers (margin counts)
+    if (/^\d+$/.test(trimmed)) return false; 
+    return true;
 }
 
 /**

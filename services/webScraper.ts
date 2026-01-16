@@ -1,5 +1,4 @@
 
-
 import { GoogleGenAI } from "@google/genai";
 import { IGTXSource } from "../types";
 
@@ -14,8 +13,8 @@ export async function scrapeUrlViaGemini(url: string, apiKey: string): Promise<{
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // Upgraded to Pro for better context understanding and search synthesis
-  const model = 'gemini-3-pro-preview'; 
+  // Use Flash for fast, grounded search retrieval
+  const model = 'gemini-3-flash-preview'; 
 
   // Prompt engineered for ethnographic text extraction with STRICT guardrails
   // Using specific instructions to leverage Search Grounding effectively

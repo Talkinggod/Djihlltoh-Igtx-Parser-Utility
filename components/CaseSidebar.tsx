@@ -1,6 +1,6 @@
 
-import React from 'react';
-import { Plus, Briefcase, Scale, FileText, AlertCircle, Cloud, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, Briefcase, Scale, FileText, AlertCircle, Cloud, PanelLeftClose, PanelLeftOpen, X, Edit2, Check, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { CaseState } from '../types';
@@ -11,17 +11,53 @@ interface CaseSidebarProps {
     onSwitchCase: (id: string) => void;
     onCreateCase: () => void;
     onCloseCase: (id: string) => void;
+    onRenameCase: (id: string, newName: string) => void;
     isOpen: boolean;
     toggleSidebar: () => void;
     onConnectCloud?: () => void;
 }
 
 export const CaseSidebar: React.FC<CaseSidebarProps> = ({ 
-    cases, activeCaseId, onSwitchCase, onCreateCase, onCloseCase, isOpen, toggleSidebar, onConnectCloud 
+    cases, activeCaseId, onSwitchCase, onCreateCase, onCloseCase, onRenameCase, isOpen, toggleSidebar, onConnectCloud 
 }) => {
     
     // Sort cases by last active
     const sortedCases = [...cases].sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
+    
+    // Rename State
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editName, setEditName] = useState("");
+
+    const startEditing = (e: React.MouseEvent, c: CaseState) => {
+        e.stopPropagation();
+        setEditingId(c.id);
+        setEditName(c.name);
+    };
+
+    const saveEditing = (e: React.MouseEvent | React.KeyboardEvent, id: string) => {
+        e.stopPropagation();
+        if (editName.trim()) {
+            onRenameCase(id, editName.trim());
+        }
+        setEditingId(null);
+    };
+
+    const cancelEditing = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingId(null);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent, id: string) => {
+        if (e.key === 'Enter') saveEditing(e, id);
+        if (e.key === 'Escape') setEditingId(null);
+    };
+
+    const handleDelete = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        if (confirm("Are you sure you want to delete this case? This action cannot be undone.")) {
+            onCloseCase(id);
+        }
+    };
 
     return (
         <div 
@@ -60,15 +96,16 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
             <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar overflow-x-hidden">
                 {sortedCases.map(c => {
                     const isActive = c.id === activeCaseId;
+                    const isEditing = editingId === c.id;
                     const criticalEvents = c.events.filter(e => !e.read && (e.type === 'error' || e.type === 'deadline')).length;
                     const hasCloud = !!c.googleFolderId;
                     
                     return (
                         <div 
                             key={c.id}
-                            onClick={() => onSwitchCase(c.id)}
+                            onClick={() => !isEditing && onSwitchCase(c.id)}
                             className={cn(
-                                "group relative flex items-center gap-3 p-2 rounded-md cursor-pointer transition-all border",
+                                "group relative flex items-center gap-3 p-2 rounded-md cursor-pointer transition-all border min-h-[3rem]",
                                 isActive 
                                     ? "bg-background border-primary/30 shadow-sm" 
                                     : "bg-transparent border-transparent hover:bg-muted/50 hover:border-border/50"
@@ -92,26 +129,61 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                             {/* Text Content - Only render if open to avoid layout shift issues during transition */}
                             {isOpen && (
                                 <div className="flex-1 min-w-0 animate-in fade-in zoom-in-95 duration-200">
-                                    <div className="text-sm font-medium truncate text-foreground">{c.name}</div>
-                                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                                        <span className="truncate max-w-[80px]">{c.docTypeId ? c.docTypeId.replace(/_/g, ' ') : 'Draft'}</span>
-                                        {criticalEvents > 0 && (
-                                            <span className="flex items-center gap-0.5 text-amber-600 font-bold bg-amber-500/10 px-1 rounded animate-pulse">
-                                                <AlertCircle className="w-2.5 h-2.5" />
-                                                {criticalEvents}
-                                            </span>
-                                        )}
-                                    </div>
+                                    {isEditing ? (
+                                        <div className="flex items-center gap-1">
+                                            <input 
+                                                className="w-full h-7 px-2 text-xs bg-background border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                                                value={editName}
+                                                onChange={(e) => setEditName(e.target.value)}
+                                                onKeyDown={(e) => handleKeyDown(e, c.id)}
+                                                autoFocus
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                            <Button size="icon" variant="ghost" className="h-6 w-6 text-green-600 hover:text-green-700" onClick={(e) => saveEditing(e, c.id)}>
+                                                <Check className="w-3 h-3" />
+                                            </Button>
+                                            <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={cancelEditing}>
+                                                <X className="w-3 h-3" />
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="flex justify-between items-center group-hover:pr-14 transition-all">
+                                                <div className="text-sm font-medium truncate text-foreground">{c.name}</div>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                                <span className="truncate max-w-[80px]">{c.docTypeId ? c.docTypeId.replace(/_/g, ' ') : 'Draft'}</span>
+                                                {criticalEvents > 0 && (
+                                                    <span className="flex items-center gap-0.5 text-amber-600 font-bold bg-amber-500/10 px-1 rounded animate-pulse">
+                                                        <AlertCircle className="w-2.5 h-2.5" />
+                                                        {criticalEvents}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
 
-                            {isActive && isOpen && cases.length > 1 && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); onCloseCase(c.id); }}
-                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded transition-all absolute right-2 top-1/2 -translate-y-1/2"
-                                >
-                                    <X className="w-3.5 h-3.5" />
-                                </button>
+                            {!isEditing && isOpen && (
+                                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm rounded-md p-0.5 border border-border/50 shadow-sm">
+                                    <button 
+                                        onClick={(e) => startEditing(e, c)}
+                                        className="p-1.5 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded transition-all"
+                                        title="Rename Case"
+                                    >
+                                        <Edit2 className="w-3 h-3" />
+                                    </button>
+                                    {cases.length > 1 && (
+                                        <button 
+                                            onClick={(e) => handleDelete(e, c.id)}
+                                            className="p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded transition-all"
+                                            title="Delete Case"
+                                        >
+                                            <Trash2 className="w-3 h-3" />
+                                        </button>
+                                    )}
+                                </div>
                             )}
                         </div>
                     );

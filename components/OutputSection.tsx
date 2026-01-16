@@ -1,8 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ParseReport, ParserDomain } from '../types';
 import { PhysicsDashboard } from './PhysicsDashboard';
-import { Copy, Check, Binary, Layout, FileText, FileJson } from 'lucide-react';
+import { TimelineView } from './TimelineView';
+import { LegalAnalyzer } from '../services/legalAnalyzer';
+import { Copy, Check, Binary, Layout, FileText, FileJson, Calendar } from 'lucide-react';
 import { Card } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
@@ -35,6 +37,24 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Extract dates for Timeline View
+  const extractedDates = useMemo(() => {
+      if (!report?.fullExtractedText) return [];
+      try {
+          const analyzer = new LegalAnalyzer();
+          // We assume 'unknown' doc type for visualization purposes if not present in metadata
+          const result = analyzer.analyze({ 
+              id: 'viz', 
+              content: report.fullExtractedText, 
+              documentType: report.metadata.documentType || 'unknown' 
+          });
+          return result.dates;
+      } catch (e) {
+          console.error("Timeline extraction failed", e);
+          return [];
+      }
+  }, [report?.fullExtractedText, report?.metadata.documentType]);
+
   if (!report) {
     return (
       <Card className="h-full border-border border-dashed bg-muted/10 shadow-none">
@@ -53,6 +73,9 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
         <div className="border-b bg-muted/20 px-4 py-2 flex items-center justify-between shrink-0">
           <TabsList className="bg-muted/50 h-8">
             <TabsTrigger value="editor" className="text-xs">{t.tab_clean}</TabsTrigger>
+            <TabsTrigger value="timeline" className="gap-2 text-xs">
+                <Calendar className="w-3 h-3" /> Timeline
+            </TabsTrigger>
             <TabsTrigger value="physics" className="gap-2 text-xs">
                 <Binary className="w-3 h-3" /> Architecture
             </TabsTrigger>
@@ -69,6 +92,10 @@ export const OutputSection: React.FC<OutputSectionProps> = ({ report, onUpdateRe
             <pre className="font-mono text-sm text-foreground whitespace-pre-wrap leading-relaxed" dir="ltr">
               {report.fullExtractedText}
             </pre>
+          </TabsContent>
+
+          <TabsContent value="timeline" className="min-h-full mt-0">
+             <TimelineView dates={extractedDates} />
           </TabsContent>
 
           <TabsContent value="physics" className="min-h-full mt-0">

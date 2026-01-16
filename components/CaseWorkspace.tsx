@@ -8,14 +8,15 @@ import { OutputSection } from './OutputSection';
 import { ResourceExplorer, ResourceItem } from './ResourceExplorer';
 import { ViabilityDashboard } from './ViabilityDashboard';
 import { LegalBenchTools } from './LegalBenchTools';
-import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope, Bell, Filter, Check, X, Info, AlertTriangle, FolderTree } from 'lucide-react';
+import { ClaimManager } from './ClaimManager';
+import { FileText, Files, StickyNote, Image, Trash2, Plus, Search, Calendar, Scale, Clock, PenTool, LayoutTemplate, Save, FilePlus, Database, Gavel, CheckCircle2, AlertCircle, TrendingUp, Loader2, Microscope, Bell, Filter, Check, X, Info, AlertTriangle, FolderTree, Wand2, Sparkles, Languages, Eye, Edit3, BookOpen, BrainCircuit, History, ShieldAlert } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { extractTextFromPdf } from '../services/pdfExtractor';
 import { GoogleDriveService } from '../services/googleDriveService';
 import { ResizableSplitView } from './ui/ResizableSplitView';
-import { generateViabilityAssessment } from '../services/aiService';
+import { generateViabilityAssessment, refineDraft } from '../services/aiService';
 import { RuleEditorDialog } from './RuleEditorDialog';
 import { FileSystemService } from '../services/fileSystemService';
 
@@ -34,20 +35,29 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     caseData, updateCase, onProcess, onClear, lang, apiKey, googleUser 
 }) => {
     const [activeTab, setActiveTab] = useState("analysis");
-    const [strategySubTab, setStrategySubTab] = useState<'viability' | 'legalbench'>('viability');
+    const [strategySubTab, setStrategySubTab] = useState<'viability' | 'legalbench' | 'claims'>('viability');
     const [docFilter, setDocFilter] = useState<string>('all');
     const [exhibitFilter, setExhibitFilter] = useState<ExhibitStatus | 'all'>('all');
     const [isAssessing, setIsAssessing] = useState(false);
     const [isRuleEditorOpen, setIsRuleEditorOpen] = useState(false);
     const [scaffolding, setScaffolding] = useState(false);
+    const [isRefining, setIsRefining] = useState(false);
     
+    // Drafting State
+    const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
+    const [workMode, setWorkMode] = useState<'practice' | 'draft' | 'research'>('draft');
+
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const templateInputRef = React.useRef<HTMLInputElement>(null);
 
-    // Initialize Active Draft if none
+    // Initialize Active Draft and Claims if none
     useEffect(() => {
+        const updates: Partial<CaseState> = {};
+        let hasUpdates = false;
+
         if (!caseData.activeDraftId && caseData.drafts && caseData.drafts.length > 0) {
-            updateCase({ activeDraftId: caseData.drafts[0].id });
+            updates.activeDraftId = caseData.drafts[0].id;
+            hasUpdates = true;
         } else if (!caseData.drafts || caseData.drafts.length === 0) {
              // Create initial blank draft
              const newDraft: Draft = {
@@ -58,9 +68,18 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                  updatedAt: new Date().toISOString(),
                  status: 'Draft'
              };
-             updateCase({ drafts: [newDraft], activeDraftId: newDraft.id });
+             updates.drafts = [newDraft];
+             updates.activeDraftId = newDraft.id;
+             hasUpdates = true;
         }
-    }, [caseData.drafts]);
+
+        if (!caseData.claims) {
+            updates.claims = [];
+            hasUpdates = true;
+        }
+
+        if (hasUpdates) updateCase(updates);
+    }, [caseData.drafts, caseData.activeDraftId, caseData.claims]);
 
     const activeDraft = caseData.drafts?.find(d => d.id === caseData.activeDraftId) || caseData.drafts?.[0];
 
@@ -184,6 +203,48 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
             d.id === activeDraft.id ? { ...d, content: template.content, updatedAt: new Date().toISOString() } : d
         );
         updateCase({ drafts: updatedDrafts });
+    };
+
+    // --- AI Refinement Logic ---
+    const handleRefineDraft = async (instruction: string) => {
+        if (!activeDraft || !apiKey) {
+            alert("Draft or API Key missing.");
+            return;
+        }
+        setIsRefining(true);
+        try {
+            const refined = await refineDraft(activeDraft.content, instruction, apiKey);
+            const updatedDrafts = caseData.drafts.map(d => 
+                d.id === activeDraft.id ? { ...d, content: refined, updatedAt: new Date().toISOString() } : d
+            );
+            updateCase({ drafts: updatedDrafts });
+        } catch(e: any) {
+            alert(`AI Refinement failed: ${e.message}`);
+        } finally {
+            setIsRefining(false);
+        }
+    };
+
+    // --- Drafting Utilities ---
+    const handleCommit = () => {
+        // In a real app, this might commit to git or save a version
+        if (activeDraft) {
+            const updatedDrafts = caseData.drafts.map(d => 
+                d.id === activeDraft.id ? { ...d, status: 'Final' as const, updatedAt: new Date().toISOString() } : d
+            );
+            updateCase({ drafts: updatedDrafts });
+            alert("Draft committed as Final Version.");
+        }
+    };
+
+    const handleTimestamp = () => {
+        if (activeDraft) {
+            const timeStr = ` [${new Date().toLocaleTimeString()}] `;
+            const updatedDrafts = caseData.drafts.map(d => 
+                d.id === activeDraft.id ? { ...d, content: activeDraft.content + timeStr, updatedAt: new Date().toISOString() } : d
+            );
+            updateCase({ drafts: updatedDrafts });
+        }
     };
 
     // --- Viability Assessment Logic ---
@@ -416,7 +477,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                 {activeTab === 'drafting' && (
                     <div className="h-full w-full animate-in fade-in zoom-in-95 duration-200">
                         <ResizableSplitView
-                            initialLeftWidth={30}
+                            initialLeftWidth={20}
                             left={
                                 <div className="h-full flex flex-col p-4 bg-muted/10 border-r">
                                     <div className="flex items-center justify-between mb-4">
@@ -457,49 +518,125 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                             </div>
                                         ))}
                                     </div>
+                                    <div className="mt-4 pt-4 border-t">
+                                        <Button size="sm" variant="ghost" className="w-full justify-start text-xs" onClick={() => {
+                                             const newDraft = {
+                                                 id: Date.now().toString(), title: `Draft ${caseData.drafts.length + 1}`,
+                                                 content: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), status: 'Draft' as const
+                                             };
+                                             updateCase({ drafts: [...caseData.drafts, newDraft], activeDraftId: newDraft.id });
+                                        }}>
+                                            <FilePlus className="w-3.5 h-3.5 mr-2" /> New Draft
+                                        </Button>
+                                    </div>
                                 </div>
                             }
                             right={
-                                <div className="h-full flex flex-col bg-background">
-                                     <div className="border-b p-2 flex items-center justify-between bg-muted/10">
-                                         <div className="flex items-center gap-2">
-                                             <FileText className="w-4 h-4 text-primary" />
+                                <div className="h-full flex flex-col bg-background relative">
+                                     {/* Enhanced Drafting Toolbar */}
+                                     <div className="border-b p-2 flex flex-col md:flex-row items-center justify-between bg-muted/10 shrink-0 gap-2">
+                                         
+                                         {/* Index Number & Title */}
+                                         <div className="flex items-center gap-3 w-full md:w-auto">
+                                             <Badge variant="outline" className="h-8 rounded px-3 font-mono bg-background shadow-sm border-primary/20 text-primary">
+                                                 {caseData.caseMeta.indexNumber || "No Index #"}
+                                             </Badge>
                                              <input 
-                                                className="bg-transparent border-none font-bold text-sm focus:outline-none"
+                                                className="bg-transparent border-none font-bold text-sm focus:outline-none flex-1 md:flex-none md:w-64"
                                                 value={activeDraft?.title || "Untitled Draft"}
                                                 onChange={(e) => {
                                                     const updated = caseData.drafts.map(d => d.id === caseData.activeDraftId ? {...d, title: e.target.value} : d);
                                                     updateCase({ drafts: updated });
                                                 }}
+                                                placeholder="Draft Title..."
                                              />
                                          </div>
-                                         <div className="flex gap-2">
-                                             <Button size="sm" variant="ghost" onClick={() => {
-                                                 const newDraft = {
-                                                     id: Date.now().toString(), title: `Draft ${caseData.drafts.length + 1}`,
-                                                     content: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), status: 'Draft' as const
-                                                 };
-                                                 updateCase({ drafts: [...caseData.drafts, newDraft], activeDraftId: newDraft.id });
-                                             }}>
-                                                 <FilePlus className="w-3.5 h-3.5 mr-2" /> New
+
+                                         {/* Control Group */}
+                                         <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto scrollbar-hide pb-1 md:pb-0">
+                                             {/* Modes */}
+                                             <div className="flex bg-muted/50 rounded-lg p-1 mr-2">
+                                                 <Button size="sm" variant={workMode === 'practice' ? 'default' : 'ghost'} className="h-7 text-xs px-3 rounded-md" onClick={() => setWorkMode('practice')}>
+                                                     Practice
+                                                 </Button>
+                                                 <Button size="sm" variant="ghost" className="h-7 text-xs px-3 rounded-md hover:text-purple-500" onClick={() => handleRefineDraft("Perfect grammar and legal style")}>
+                                                     <Sparkles className="w-3 h-3 mr-1" /> Perfect
+                                                 </Button>
+                                                 <Button size="sm" variant={workMode === 'draft' ? 'default' : 'ghost'} className="h-7 text-xs px-3 rounded-md" onClick={() => setWorkMode('draft')}>
+                                                     Draft
+                                                 </Button>
+                                                 <Button size="sm" variant={workMode === 'research' ? 'default' : 'ghost'} className="h-7 text-xs px-3 rounded-md" onClick={() => { setWorkMode('research'); setActiveTab('strategy'); }}>
+                                                     <BrainCircuit className="w-3 h-3 mr-1" /> Research
+                                                 </Button>
+                                             </div>
+
+                                             <div className="w-px h-6 bg-border mx-1" />
+
+                                             {/* View Toggles */}
+                                             <div className="flex gap-1">
+                                                 <Button 
+                                                    size="sm" 
+                                                    variant={editorMode === 'edit' ? 'secondary' : 'ghost'} 
+                                                    className="h-8 gap-2 text-xs"
+                                                    onClick={() => setEditorMode('edit')}
+                                                 >
+                                                     <Edit3 className="w-3.5 h-3.5" /> Edit
+                                                 </Button>
+                                                 <Button 
+                                                    size="sm" 
+                                                    variant={editorMode === 'preview' ? 'secondary' : 'ghost'} 
+                                                    className="h-8 gap-2 text-xs"
+                                                    onClick={() => setEditorMode('preview')}
+                                                 >
+                                                     <Eye className="w-3.5 h-3.5" /> Preview
+                                                 </Button>
+                                             </div>
+
+                                             <div className="w-px h-6 bg-border mx-1" />
+
+                                             {/* Utilities */}
+                                             <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={handleTimestamp} title="Insert Timestamp">
+                                                 <Clock className="w-3.5 h-3.5" /> Time
                                              </Button>
-                                             <Button size="sm" variant="default">
-                                                 <Save className="w-3.5 h-3.5 mr-2" /> Save Draft
+                                             
+                                             <Button size="sm" variant="default" className={cn("h-8 gap-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white")} onClick={handleCommit}>
+                                                 <CheckCircle2 className="w-3.5 h-3.5" /> Commit
                                              </Button>
                                          </div>
                                      </div>
-                                     <textarea 
-                                        className="flex-1 resize-none p-8 font-mono text-sm leading-relaxed outline-none custom-scrollbar bg-background text-foreground"
-                                        placeholder="Start drafting here or use the AI Assistant to write..."
-                                        value={activeDraft?.content || ""}
-                                        onChange={(e) => {
-                                            const updated = caseData.drafts.map(d => d.id === caseData.activeDraftId ? {...d, content: e.target.value, updatedAt: new Date().toISOString()} : d);
-                                            updateCase({ drafts: updated });
-                                        }}
-                                        spellCheck={false}
-                                     />
-                                     <div className="border-t p-1 bg-muted/10 text-[10px] text-muted-foreground text-center">
-                                         Last updated: {new Date(activeDraft?.updatedAt || Date.now()).toLocaleTimeString()}
+                                     
+                                     {/* Editor Surface */}
+                                     <div className="flex-1 bg-muted/20 relative overflow-auto custom-scrollbar flex justify-center">
+                                         {editorMode === 'edit' ? (
+                                             <textarea 
+                                                className="w-full h-full resize-none p-8 font-mono text-sm leading-relaxed outline-none bg-background text-foreground border-none"
+                                                placeholder="Start drafting here..."
+                                                value={activeDraft?.content || ""}
+                                                onChange={(e) => {
+                                                    const updated = caseData.drafts.map(d => d.id === caseData.activeDraftId ? {...d, content: e.target.value, updatedAt: new Date().toISOString()} : d);
+                                                    updateCase({ drafts: updated });
+                                                }}
+                                                spellCheck={false}
+                                             />
+                                         ) : (
+                                             <div className="py-8 px-4 w-full flex justify-center min-h-full">
+                                                 <div className="bg-white text-black w-full max-w-[8.5in] min-h-[11in] shadow-lg p-[1in] font-serif text-[12pt] leading-[2.0] whitespace-pre-wrap select-text">
+                                                     {activeDraft?.content || <span className="text-gray-300 italic">No content...</span>}
+                                                 </div>
+                                             </div>
+                                         )}
+                                         
+                                         {/* Floating AI status if refining */}
+                                         {isRefining && (
+                                             <div className="absolute bottom-4 right-4 bg-primary text-primary-foreground px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-xs animate-in fade-in slide-in-from-bottom-2">
+                                                 <Loader2 className="w-4 h-4 animate-spin" /> Perfecting Draft...
+                                             </div>
+                                         )}
+                                     </div>
+
+                                     <div className="border-t p-1 bg-muted/10 text-[10px] text-muted-foreground text-center flex justify-between px-4">
+                                         <span>Mode: {workMode.toUpperCase()}</span>
+                                         <span>Last updated: {new Date(activeDraft?.updatedAt || Date.now()).toLocaleTimeString()}</span>
                                      </div>
                                 </div>
                             }
@@ -523,6 +660,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                     <TabsList className="bg-muted/50 h-8">
                                         <TabsTrigger value="viability" className="text-xs h-6 px-2">Merits</TabsTrigger>
                                         <TabsTrigger value="legalbench" className="text-xs h-6 px-2 flex gap-1"><Microscope className="w-3 h-3"/> Deep Analysis</TabsTrigger>
+                                        <TabsTrigger value="claims" className="text-xs h-6 px-2 flex gap-1"><ShieldAlert className="w-3 h-3"/> Claims</TabsTrigger>
                                     </TabsList>
                                 </Tabs>
                                 {strategySubTab === 'viability' && (
@@ -557,6 +695,12 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                         </Button>
                                     </div>
                                 )
+                            ) : strategySubTab === 'claims' ? (
+                                <ClaimManager 
+                                    caseData={caseData} 
+                                    updateCase={updateCase} 
+                                    apiKey={apiKey} 
+                                />
                             ) : (
                                 <LegalBenchTools 
                                     apiKey={apiKey} 

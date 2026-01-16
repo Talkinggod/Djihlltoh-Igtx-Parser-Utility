@@ -1,12 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2, Settings, Lock, Check, FileCheck, Globe, Database, FolderSearch, Gavel, Tag, StopCircle } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2, Settings, Lock, Check, FileCheck, Globe, Database, FolderSearch, Gavel, Tag, StopCircle, FilePlus, BrainCircuit } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { sendChatMessage, writeDraftTool } from '../services/aiService';
-import { ParserDomain, LanguageProfile, CaseEvent, UILanguage, AIPrivileges, Template, Draft, GoogleUser, CaseState, EvidenceTag } from '../types';
+import { ParserDomain, LanguageProfile, CaseEvent, UILanguage, AIPrivileges, Template, Draft, GoogleUser, CaseState, EvidenceTag, ParseReport, Claim } from '../types';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { translations } from '../services/translations';
 import { GoogleDriveService } from '../services/googleDriveService';
@@ -20,6 +20,7 @@ interface ChatBotProps {
     // Callbacks
     onUpdateEditor?: (content: string) => void;
     onUpdateDraft?: (content: string) => void;
+    onCreateDraft?: (title: string, content: string) => void;
     // New Callbacks for Evidence Tools
     onUpdateCaseState?: (updates: (prevState: CaseState) => Partial<CaseState>) => void;
 
@@ -30,6 +31,7 @@ interface ChatBotProps {
         docType: string;
         events: CaseEvent[];
         refDate: Date;
+        claims?: Claim[];
     };
     
     // Resources
@@ -44,6 +46,8 @@ interface ChatBotProps {
     lang: UILanguage;
     // Google Auth
     googleUser?: GoogleUser;
+    // Physics Report
+    report?: ParseReport | null;
 }
 
 interface Message {
@@ -116,8 +120,8 @@ async function decodeAudioData(
 }
 
 export const ChatBot: React.FC<ChatBotProps> = ({ 
-    apiKey, domain, profile, context, onUpdateEditor, onUpdateDraft, onUpdateCaseState,
-    caseContext, localSyncInfo, lang, allDocuments, templates, googleUser
+    apiKey, domain, profile, context, onUpdateEditor, onUpdateDraft, onCreateDraft, onUpdateCaseState,
+    caseContext, localSyncInfo, lang, allDocuments, templates, googleUser, report
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [showPrivileges, setShowPrivileges] = useState(false);
@@ -161,6 +165,9 @@ export const ChatBot: React.FC<ChatBotProps> = ({
     // Transcription State
     const [currentInputTranscription, setCurrentInputTranscription] = useState("");
     const [currentOutputTranscription, setCurrentOutputTranscription] = useState("");
+
+    // Calculate approx context load
+    const contextSize = (context?.length || 0) + (allDocuments?.reduce((acc, d) => acc + d.content.length, 0) || 0);
 
     useEffect(() => {
         if (isOpen) {
@@ -217,23 +224,46 @@ export const ChatBot: React.FC<ChatBotProps> = ({
         let richContext = "";
         if (caseContext) {
              richContext += `[CASE METADATA]\nID: ${caseContext.id}\nName: ${caseContext.name}\nDocType: ${caseContext.docType}\nFiling Date: ${caseContext.refDate.toISOString()}\n\n`;
+             
+             // Inject Detected Claims
+             if (caseContext.claims && caseContext.claims.length > 0) {
+                 richContext += `[INTELLIGENCE RADAR: CLAIMS & DEFENSES]\n`;
+                 caseContext.claims.forEach(c => {
+                     richContext += `- [${c.status.toUpperCase()}] ${c.title} (${c.likelihood}%): ${c.description}\n`;
+                 });
+                 richContext += `\n`;
+             }
+
              if (caseContext.events.length > 0) {
                  richContext += `[CASE EVENTS]\n${caseContext.events.map(e => `- [${e.type}] ${e.title}: ${e.message}`).join('\n')}\n\n`;
              }
         }
+        
+        // Physics Injection
+        if (report?.metadata?.twoLayerState?.physics) {
+            const phys = report.metadata.twoLayerState.physics;
+            richContext += `[SEMANTIC PHYSICS / COHERENCE DATA]\n`;
+            richContext += `Decay Rate (λ): ${phys.λ_measured.toFixed(5)} (Standard: 0.01-0.05. >0.1 implies fragmentation)\n`;
+            richContext += `Asymmetry (κ): ${phys.κ_physics.toFixed(5)} (Directional flow indicator)\n`;
+            richContext += `Structural Fit (R²): ${phys.r_squared.toFixed(4)} (Model confidence)\n`;
+            if (!phys.is_admissible) richContext += `WARNING: Document rejected by physics gate: ${phys.refusal_reason}\n`;
+            richContext += `\n`;
+        }
+
+        // FULL CONTEXT INJECTION (No Slicing)
         if (context) {
-            richContext += `[ACTIVE SOURCE DOCUMENT]\n${context.slice(0, 5000)}...\n\n`;
+            richContext += `[ACTIVE SOURCE DOCUMENT]\n${context}\n\n`;
         }
         if (privileges.allowFullCaseContext && allDocuments && allDocuments.length > 0) {
              richContext += `[CASE REPOSITORY]\n`;
              allDocuments.forEach((doc, idx) => {
-                 richContext += `--- Document ${idx + 1}: ${doc.name} ---\n${doc.content.slice(0, 2000)}...\n\n`;
+                 richContext += `--- Document ${idx + 1}: ${doc.name} ---\n${doc.content}\n\n`;
              });
         }
         if (privileges.allowTemplates && templates && templates.length > 0) {
              richContext += `[AVAILABLE TEMPLATES]\n`;
              templates.forEach(t => {
-                 richContext += `Template Name: "${t.name}" (${t.category})\nContent:\n${t.content.slice(0, 500)}...\n\n`;
+                 richContext += `Template Name: "${t.name}" (${t.category})\nContent:\n${t.content}\n\n`;
              });
         }
 
@@ -473,17 +503,41 @@ export const ChatBot: React.FC<ChatBotProps> = ({
             let richContext = "";
             if (caseContext) {
                  richContext += `[CASE METADATA]\nID: ${caseContext.id}\nName: ${caseContext.name}\nDocType: ${caseContext.docType}\nFiling Date: ${caseContext.refDate.toISOString()}\n\n`;
+                 
+                 // Inject Detected Claims
+                 if (caseContext.claims && caseContext.claims.length > 0) {
+                     richContext += `[INTELLIGENCE RADAR: CLAIMS & DEFENSES]\n`;
+                     caseContext.claims.forEach(c => {
+                         richContext += `- [${c.status.toUpperCase()}] ${c.title} (${c.likelihood}%): ${c.description}\n`;
+                     });
+                     richContext += `\n`;
+                 }
+
                  if (caseContext.events.length > 0) {
                      richContext += `[CASE EVENTS]\n${caseContext.events.map(e => `- [${e.type}] ${e.title}: ${e.message}`).join('\n')}\n\n`;
                  }
             }
+            
+            // Physics Injection
+            if (report?.metadata?.twoLayerState?.physics) {
+                const phys = report.metadata.twoLayerState.physics;
+                richContext += `[SEMANTIC PHYSICS / COHERENCE DATA]\n`;
+                richContext += `Decay Rate (λ): ${phys.λ_measured.toFixed(5)} (Standard: 0.01-0.05. >0.1 implies fragmentation)\n`;
+                richContext += `Asymmetry (κ): ${phys.κ_physics.toFixed(5)} (Directional flow indicator)\n`;
+                richContext += `Structural Fit (R²): ${phys.r_squared.toFixed(4)} (Model confidence)\n`;
+                if (!phys.is_admissible) richContext += `WARNING: Document rejected by physics gate: ${phys.refusal_reason}\n`;
+                richContext += `\n`;
+            }
+
+            // FULL CONTEXT - NO SLICING
             if (context) {
-                richContext += `[ACTIVE SOURCE DOCUMENT]\n${context.slice(0, 10000)}${context.length > 10000 ? '...[TRUNCATED]' : ''}\n\n`;
+                richContext += `[ACTIVE SOURCE DOCUMENT]\n${context}\n\n`;
             }
             if (privileges.allowFullCaseContext && allDocuments && allDocuments.length > 0) {
                  richContext += `[CASE REPOSITORY]\n`;
                  allDocuments.forEach((doc, idx) => {
-                     richContext += `--- Document ${idx + 1}: ${doc.name} ---\n${doc.content.slice(0, 2000)}\n\n`;
+                     // Removed .slice() to ensure full RAG context
+                     richContext += `--- Document ${idx + 1}: ${doc.name} ---\n${doc.content}\n\n`;
                  });
             }
             if (privileges.allowTemplates && templates && templates.length > 0) {
@@ -525,6 +579,12 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                             onUpdateDraft(args.content);
                             toolResult = "Draft updated successfully.";
                             actionTaken = "Draft Updated";
+                        }
+                    } else if (toolName === 'create_new_draft') {
+                        if (onCreateDraft) {
+                            onCreateDraft(args.title, args.content);
+                            toolResult = `New draft '${args.title}' created and opened.`;
+                            actionTaken = "New Draft Created";
                         }
                     } else if (toolName === 'write_to_editor') {
                         if (onUpdateEditor) {
@@ -581,7 +641,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                         try {
                             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: `Reading file ${args.fileId}...`, timestamp: new Date() }]);
                             const content = await GoogleDriveService.downloadFile(args.fileId, 'application/vnd.google-apps.document', googleUser.accessToken);
-                            toolResult = `File Content: ${content.slice(0, 5000)}...`;
+                            toolResult = `File Content: ${content}`; // No slice
                         } catch (e: any) {
                             toolResult = `Error reading file: ${e.message}`;
                         }
@@ -647,21 +707,23 @@ export const ChatBot: React.FC<ChatBotProps> = ({
     return (
         <>
             {/* Floating Toggle Button */}
-            <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4">
+            <div className="fixed bottom-6 right-6 z-[100] animate-in fade-in slide-in-from-bottom-4">
                 <Button 
                     onClick={() => setIsOpen(!isOpen)}
                     className={cn(
-                        "h-14 w-14 rounded-full shadow-xl transition-all duration-300 relative",
-                        isOpen ? "bg-destructive hover:bg-destructive/90 rotate-90" : "bg-primary hover:bg-primary/90"
+                        "h-14 w-14 rounded-full shadow-xl transition-all duration-300 relative border-2 border-background",
+                        isOpen ? "bg-destructive hover:bg-destructive/90 rotate-90" : "bg-primary hover:bg-primary/90 hover:scale-105"
                     )}
                 >
                     {isOpen ? <X className="h-6 w-6 text-destructive-foreground" /> : <MessageSquare className="h-6 w-6 text-primary-foreground" />}
+                    {!isOpen && <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />}
+                    {!isOpen && <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full" />}
                 </Button>
             </div>
 
             {/* Chat Window */}
             {isOpen && (
-                <Card className="fixed bottom-24 right-6 w-[90vw] md:w-[400px] h-[600px] max-h-[80vh] z-50 shadow-2xl flex flex-col border-primary/20 bg-background/95 backdrop-blur animate-in slide-in-from-bottom-10 fade-in zoom-in-95">
+                <Card className="fixed bottom-24 right-6 w-[90vw] md:w-[400px] h-[600px] max-h-[80vh] z-[100] shadow-2xl flex flex-col border-primary/20 bg-background/95 backdrop-blur animate-in slide-in-from-bottom-10 fade-in zoom-in-95">
                     
                     {/* Header */}
                     <div className="p-4 border-b bg-muted/30 flex items-center justify-between shrink-0 rounded-t-lg">
@@ -677,6 +739,11 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                                     {domain === 'legal' ? "Legal Assistant" : "Linguist Assistant"}
                                     {isLive && <Badge variant="outline" className="text-[9px] bg-red-500/10 text-red-500 border-red-500/30 animate-pulse">LIVE</Badge>}
                                 </h3>
+                                {/* CONTEXT LOAD INDICATOR */}
+                                <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                    <BrainCircuit className="w-3 h-3" />
+                                    <span>Ctx: {(contextSize / 1000).toFixed(1)}k chars (100% Loaded)</span>
+                                </div>
                             </div>
                         </div>
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setShowPrivileges(!showPrivileges)}>
@@ -774,7 +841,10 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                                     </div>
                                     {msg.action && (
                                         <div className="flex items-center gap-1.5 text-[10px] font-mono text-purple-400 animate-in fade-in slide-in-from-left-2">
-                                            {msg.action === 'Marked Exhibit' ? <Gavel className="w-3 h-3" /> : (msg.action === 'Evidence Tagged' ? <Tag className="w-3 h-3" /> : <FileEdit className="w-3 h-3" />)}
+                                            {msg.action === 'Marked Exhibit' ? <Gavel className="w-3 h-3" /> : 
+                                             msg.action === 'Evidence Tagged' ? <Tag className="w-3 h-3" /> : 
+                                             msg.action === 'New Draft Created' ? <FilePlus className="w-3 h-3" /> :
+                                             <FileEdit className="w-3 h-3" />}
                                             <span>{msg.action}</span>
                                         </div>
                                     )}

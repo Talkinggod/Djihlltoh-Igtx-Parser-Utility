@@ -1,5 +1,4 @@
 
-
 export type ParserDomain = 'linguistic' | 'legal' | 'scientific' | 'belief_system';
 
 export type LanguageProfile = 
@@ -52,6 +51,14 @@ export interface CalibrationEntry {
 
 // --- Internal Parse Types ---
 
+export interface Tier4Assessment {
+    isConsistent: boolean;
+    detectedFeatures: string[];
+    avgWordLength: number;
+    polysynthesisScore: number;
+    notes: string;
+}
+
 export interface ParserMetadata {
   sourceType: string;
   igtxVersion: string;
@@ -65,6 +72,7 @@ export interface ParserMetadata {
   };
   // Added documentType property
   documentType?: string;
+  tier4Assessment?: Tier4Assessment;
 }
 
 export interface StructuralAnalysis {
@@ -140,6 +148,7 @@ export interface CaseState {
     customRules?: CustomRule[];
     templates?: Template[];
     sourceMeta?: Partial<IGTXSource>;
+    claims?: Claim[]; // Intelligent Claim Notification System
 }
 
 export interface IGTXSource {
@@ -221,6 +230,16 @@ export interface CaseEvent {
     message: string;
     timestamp: Date;
     read: boolean;
+}
+
+export interface Claim {
+    id: string;
+    title: string; // e.g. "Breach of Contract"
+    description: string;
+    status: 'potential' | 'asserted' | 'defended' | 'dismissed';
+    likelihood: number; // 0-100
+    supportingEvidenceIds?: string[];
+    detectedAt: string;
 }
 
 export type UILanguage = 'en' | 'zh-CN' | 'zh-TW' | 'ar';
