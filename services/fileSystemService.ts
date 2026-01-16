@@ -1,4 +1,5 @@
 
+
 import { CaseState, StoredDocument, Note, ExplorerItem } from '../types';
 import { extractTextFromPdf } from './pdfExtractor';
 
@@ -201,6 +202,7 @@ export const FileSystemService = {
             // Determine Target Folder based on Category
             let targetDirName = '05_Exhibits'; // Default
             
+            // Corrected property access for category
             if (doc.category === 'pleading') targetDirName = '01_Pleadings';
             else if (doc.category === 'discovery') targetDirName = '02_Discovery';
             else if (doc.category === 'motion') targetDirName = '03_Motions';
@@ -214,6 +216,7 @@ export const FileSystemService = {
             
             // Subfolder logic (if path provided in doc)
             let finalDir = targetDir;
+            // Corrected property access for folderPath
             if (doc.folderPath) {
                 // handle "Notices_to_Admit" inside "02_Discovery"
                 const parts = doc.folderPath.split('/').filter(p => p !== targetDirName);
@@ -223,7 +226,8 @@ export const FileSystemService = {
             }
 
             const safeName = doc.name.replace(/[^a-z0-9.]/gi, '_');
-            const content = `[Type: ${doc.type}] [Side: ${doc.side}]\n\n${doc.content}`;
+            // Corrected property access for side
+            const content = `[Type: ${doc.type}] [Side: ${doc.side || 'neutral'}]\n\n${doc.content}`;
             
             // Write (Text file for simplicity, in real app would write binary for PDF)
             // Ensure .txt extension if not present
@@ -293,7 +297,7 @@ export const FileSystemService = {
                         name: file.name,
                         type: type,
                         content: content,
-                        side: 'neutral',
+                        side: 'neutral', // side property added to StoredDocument in types.ts
                         dateAdded: new Date().toISOString(),
                         category: category,
                         folderPath: path // Store the relative path

@@ -129,6 +129,7 @@ export const DocumentTypeAdvisor = {
         } catch (e) {
             console.error("Failed to generate definition", e);
             // Fallback
+            // Fix: Add missing required property 'requiredSections'
             return {
                 id: typeName.toLowerCase().replace(/\s+/g, '_'),
                 name: typeName,
@@ -138,6 +139,7 @@ export const DocumentTypeAdvisor = {
                 deadlines: [],
                 relatedMotions: [],
                 strategies: [],
+                requiredSections: [],
                 isUserDefined: true
             };
         }

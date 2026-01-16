@@ -13,7 +13,6 @@ interface CaseSidebarProps {
     onCloseCase: (id: string) => void;
     isOpen: boolean;
     toggleSidebar: () => void;
-    // New prop for cloud connect
     onConnectCloud?: () => void;
 }
 
@@ -27,14 +26,18 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
     return (
         <div 
             className={cn(
-                "h-full bg-muted/20 border-r border-border flex flex-col transition-all duration-300 overflow-hidden",
+                "h-full bg-muted/20 border-r border-border flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
                 isOpen ? "w-64" : "w-14"
             )}
         >
-            <div className={cn("border-b border-border/50 flex shrink-0 transition-all", isOpen ? "p-3 items-center justify-between h-14" : "flex-col items-center py-4 gap-4 h-auto")}>
+            {/* Header */}
+            <div className={cn(
+                "border-b border-border/50 flex shrink-0 transition-all duration-300", 
+                isOpen ? "p-3 items-center justify-between h-14" : "flex-col items-center py-4 gap-4 h-auto"
+            )}>
                 {isOpen ? (
                     <>
-                        <span className="text-sm font-bold flex items-center gap-2 text-foreground truncate">
+                        <span className="text-sm font-bold flex items-center gap-2 text-foreground truncate animate-in fade-in duration-300">
                             <Briefcase className="w-4 h-4 text-primary" />
                             Case Files
                         </span>
@@ -47,16 +50,16 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:bg-muted" onClick={toggleSidebar} title="Expand Sidebar">
                             <PanelLeftOpen className="w-4 h-4" />
                         </Button>
-                        <div className="w-full h-px bg-border/50" />
+                        <div className="w-4 h-px bg-border/50" />
                         <Briefcase className="w-5 h-5 text-primary" />
                     </>
                 )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+            {/* Case List */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar overflow-x-hidden">
                 {sortedCases.map(c => {
                     const isActive = c.id === activeCaseId;
-                    // Count unread critical events (Error or Deadline)
                     const criticalEvents = c.events.filter(e => !e.read && (e.type === 'error' || e.type === 'deadline')).length;
                     const hasCloud = !!c.googleFolderId;
                     
@@ -86,8 +89,9 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                                 )}
                             </div>
                             
+                            {/* Text Content - Only render if open to avoid layout shift issues during transition */}
                             {isOpen && (
-                                <div className="flex-1 min-w-0">
+                                <div className="flex-1 min-w-0 animate-in fade-in zoom-in-95 duration-200">
                                     <div className="text-sm font-medium truncate text-foreground">{c.name}</div>
                                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                                         <span className="truncate max-w-[80px]">{c.docTypeId ? c.docTypeId.replace(/_/g, ' ') : 'Draft'}</span>
@@ -104,7 +108,7 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                             {isActive && isOpen && cases.length > 1 && (
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); onCloseCase(c.id); }}
-                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded transition-all"
+                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded transition-all absolute right-2 top-1/2 -translate-y-1/2"
                                 >
                                     <X className="w-3.5 h-3.5" />
                                 </button>
@@ -114,6 +118,7 @@ export const CaseSidebar: React.FC<CaseSidebarProps> = ({
                 })}
             </div>
 
+            {/* Footer Actions */}
             <div className="p-3 border-t border-border/50 shrink-0 space-y-2">
                 <Button 
                     variant="outline" 

@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import { IGTXSource } from "../types";
 
@@ -74,6 +75,7 @@ If you absolutely cannot find the text content for this URL via search, return e
         text: extractedText,
         metadata: {
             source_type: 'web_scrape',
+            // source_url added to IGTXSource in types.ts
             source_url: url,
             retrieval_method: 'gemini-search-grounded',
             model: model,

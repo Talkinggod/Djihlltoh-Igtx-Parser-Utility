@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { ParseReport, ParserDomain, AIPrivileges, CaseState, ViabilityAssessment, LegalBenchResult, LegalBenchTaskType } from "../types";
 import { DocumentTypeService } from "./documentTypeService";
@@ -202,12 +203,14 @@ export async function enrichReportWithSemantics(
         throw new Error("Gemini API Key is missing. Please enter it in the header.");
     }
     const domain = report.metadata.domain;
+    // Corrected property access for documentType in metadata
     const docTypeId = report.metadata.documentType;
     const docTypeDef = docTypeId ? DocumentTypeService.getById(docTypeId) : undefined;
     const totalBlocks = report.blocks.length;
     let processed = 0;
     const enrichedBlocks = [...report.blocks];
-    const enrichedIgtxBlocks = [...report.igtxDocument.blocks];
+    // Corrected property access for igtxDocument
+    const enrichedIgtxBlocks = [...(report.igtxDocument?.blocks || [])];
 
     for (let i = 0; i < totalBlocks; i += BATCH_SIZE) {
         const batchEnd = Math.min(i + BATCH_SIZE, totalBlocks);
@@ -230,7 +233,8 @@ export async function enrichReportWithSemantics(
         processed += (batchEnd - i);
         onProgress(processed, totalBlocks);
     }
-    return { ...report, blocks: enrichedBlocks, igtxDocument: { ...report.igtxDocument, blocks: enrichedIgtxBlocks } };
+    // Corrected igtxDocument assignment to avoid type errors
+    return { ...report, blocks: enrichedBlocks, igtxDocument: { ...(report.igtxDocument || {}), blocks: enrichedIgtxBlocks } };
 }
 
 async function processBatch(blocks: any[], apiKey: string, domain: ParserDomain, docTypeDef?: any): Promise<any[]> {
@@ -328,7 +332,7 @@ export async function generateViabilityAssessment(caseData: CaseState, apiKey: s
     // Prepare Context from Case Documents
     const documentContext = caseData.documents
         .slice(0, 10) // Limit to first 10 docs to fit context window comfortably
-        .map(d => `Document [${d.type}] "${d.name}":\n${d.content.slice(0, 3000)}...`) // Truncate content
+        .map(d => `Document [${d.category || d.type}] "${d.name}":\n${d.content.slice(0, 3000)}...`) // Truncate content
         .join("\n\n---\n\n");
 
     const systemInstruction = `You are a Senior Litigation Strategist and Judicial Clerk.

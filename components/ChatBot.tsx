@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Bot, User, Scale, Library, Sparkles, FileEdit, AlertCircle, Mic, MicOff, Volume2, Settings, Lock, Check, FileCheck, Globe, Database, FolderSearch, Gavel, Tag, StopCircle } from 'lucide-react';
 import { Button } from './ui/button';
@@ -5,7 +6,7 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { sendChatMessage, writeDraftTool } from '../services/aiService';
-import { ParserDomain, LanguageProfile, CaseEvent, UILanguage, AIPrivileges, Template, Draft, GoogleUser, CaseState } from '../types';
+import { ParserDomain, LanguageProfile, CaseEvent, UILanguage, AIPrivileges, Template, Draft, GoogleUser, CaseState, EvidenceTag } from '../types';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { translations } from '../services/translations';
 import { GoogleDriveService } from '../services/googleDriveService';
@@ -551,13 +552,14 @@ export const ChatBot: React.FC<ChatBotProps> = ({
                         onUpdateCaseState(prev => {
                             const newDocs = prev.documents.map(d => {
                                 if (d.name === args.documentName) {
-                                    const newTag = {
+                                    const newTag: EvidenceTag = {
                                         id: Date.now().toString(),
                                         category: args.category,
                                         label: args.label,
                                         confidence: 0.95,
                                         description: args.explanation
                                     };
+                                    // tags property access corrected
                                     return { ...d, tags: [...(d.tags || []), newTag] };
                                 }
                                 return d;

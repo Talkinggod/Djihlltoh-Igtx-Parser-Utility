@@ -1,4 +1,5 @@
 
+
 import { PdfTextDiagnostics } from '../types';
 
 interface TextItem {
@@ -317,6 +318,7 @@ export async function extractTextFromPdf(
     fullText += `\n[SYSTEM ERROR: Critical failure during processing. ${error instanceof Error ? error.message : String(error)}]`;
   }
   
+  // Fixed PdfTextDiagnostics initialization with correct property names
   const diagnostics: PdfTextDiagnostics = {
       totalLines,
       fragmentedLineRatio: totalLines > 0 ? fragmentedLines / totalLines : 0,

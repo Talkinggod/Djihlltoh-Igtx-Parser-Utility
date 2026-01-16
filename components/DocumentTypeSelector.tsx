@@ -53,6 +53,7 @@ export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({ valu
             newDef = await DocumentTypeAdvisor.generateDefinitionForNewType(label, apiKey);
         } else {
             // Manual fallback
+            // Fix: Add missing required property 'requiredSections'
             newDef = {
                 id: tempId,
                 name: label,
@@ -62,6 +63,7 @@ export const DocumentTypeSelector: React.FC<DocumentTypeSelectorProps> = ({ valu
                 deadlines: [],
                 relatedMotions: [],
                 strategies: [],
+                requiredSections: [],
                 isUserDefined: true
             };
         }

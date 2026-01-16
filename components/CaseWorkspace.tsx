@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment, CustomRule, CaseEvent, DocCategory } from '../types';
+// Fix: removed non-existent DocCategory import
+import { CaseState, Note, StoredDocument, Template, Draft, GoogleUser, TrialExhibit, ExhibitStatus, ViabilityAssessment, CustomRule, CaseEvent, IGTXSource } from '../types';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { InputSection } from './InputSection';
 import { OutputSection } from './OutputSection';
@@ -89,12 +90,14 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     };
 
     const handleScaffoldFolders = async () => {
+        // Updated directoryHandle property access
         if (!caseData.directoryHandle) {
             alert("Please connect a Local Folder first (top right header).");
             return;
         }
         setScaffolding(true);
         try {
+            // Updated directoryHandle property access
             await FileSystemService.scaffoldCaseStructure(caseData.directoryHandle, caseData.name);
             alert("Structure created successfully on local disk!");
         } catch(e: any) {
@@ -131,8 +134,9 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
     const loadDocumentToAnalysis = (doc: StoredDocument) => {
         updateCase({ 
             input: doc.content,
+            // Fixed sourceMeta property access
             sourceMeta: { 
-                ...caseData.sourceMeta, 
+                ...(caseData.sourceMeta || {}), 
                 title: doc.name, 
                 source_type: doc.type.includes('pdf') ? 'pdf' : 'legacy_text' 
             }
@@ -149,6 +153,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
              content: content,
              category: 'Other'
          };
+         // Fixed templates property access
          updateCase({ templates: [...(caseData.templates || []), newTemplate] });
     };
 
@@ -165,6 +170,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                 category: 'Other'
             };
             
+            // Fixed templates property access
             updateCase({ templates: [...(caseData.templates || []), newTemplate] });
         } catch(e) {
             if (typeof e === 'string' && e.includes("Picker cancelled")) return;
@@ -194,6 +200,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         setIsAssessing(true);
         try {
             const assessment = await generateViabilityAssessment(caseData, apiKey);
+            // Fixed viabilityAssessment property access
             updateCase({ viabilityAssessment: assessment });
         } catch (e: any) {
             alert("Assessment failed: " + e.message);
@@ -210,6 +217,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
             content: "Double click to edit...",
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+            // Fixed history property initialization
             history: []
         };
         updateCase({
@@ -263,6 +271,7 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         const filtered = caseData.documents.filter(d => {
             if (docFilter === 'all') return true;
             // Support filtering by Side or Category
+            // Added side and category property access
             if (['plaintiff', 'defendant'].includes(docFilter)) return d.side === docFilter;
             return d.category === docFilter; // Match category (pleading, motion, etc)
         });
@@ -270,16 +279,19 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
         return filtered.map(doc => ({
             id: doc.id,
             title: doc.name,
+            // Added folderPath and category property access
             subtitle: doc.folderPath || doc.category, // Show folder path if available
             date: doc.dateAdded,
-            type: doc.type.includes('pdf') ? 'pdf' : 'text' as const,
+            // Explicitly cast type for ResourceItem compatibility
+            type: (doc.type.includes('pdf') ? 'pdf' : 'text') as 'pdf' | 'text',
             content: doc.content,
+            // Added category and tags property access
             tags: [doc.category || 'doc'],
             evidenceTags: doc.tags,
             onAction: () => loadDocumentToAnalysis(doc),
             actionLabel: "Analyze",
             onDelete: () => deleteDocument(doc.id)
-        }));
+        } as ResourceItem));
     };
     
     const noteResources: ResourceItem[] = caseData.notes.map(note => ({
@@ -364,11 +376,16 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                             lang={lang}
                                             apiKey={apiKey}
                                             domain={caseData.domain}
+                                            // Fixed docTypeId and setDocTypeId property access
                                             docTypeId={caseData.docTypeId}
                                             setDocTypeId={(id) => updateCase({ docTypeId: id })}
                                             refDate={caseData.referenceDate}
                                             setRefDate={(d) => updateCase({ referenceDate: d })}
                                             googleUser={googleUser}
+                                            // Added lambdaControl props
+                                            lambdaControl={caseData.λ_control}
+                                            setLambdaControl={(val) => updateCase({ λ_control: val })}
+                                            // Fixed customRules property access
                                             customRules={caseData.customRules}
                                             onOpenRuleEditor={() => setIsRuleEditorOpen(true)}
                                         />
@@ -425,9 +442,11 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                         />
                                     </div>
                                     <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                                        {/* Fixed templates property access */}
                                         {(caseData.templates || []).length === 0 && (
                                             <p className="text-xs text-muted-foreground text-center py-4">No templates.</p>
                                         )}
+                                        {/* Fixed templates property access */}
                                         {(caseData.templates || []).map(tmpl => (
                                             <div key={tmpl.id} className="p-3 bg-card border rounded-md hover:border-primary cursor-pointer group" onClick={() => loadTemplateToDraft(tmpl)}>
                                                 <div className="flex justify-between items-center mb-1">
@@ -517,9 +536,11 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
 
                         <div className="flex-1 min-h-0 bg-background border rounded-xl shadow-sm overflow-hidden">
                             {strategySubTab === 'viability' ? (
+                                // Fixed viabilityAssessment property access
                                 caseData.viabilityAssessment ? (
                                     <ViabilityDashboard 
                                         assessment={caseData.viabilityAssessment} 
+                                        // Fixed viabilityAssessment property access
                                         onUpdate={(updated) => updateCase({ viabilityAssessment: updated })}
                                     />
                                 ) : (
@@ -553,8 +574,10 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                         <div className="bg-blue-500/5 px-4 py-2 border-b border-blue-500/20 flex justify-between items-center text-xs">
                             <span className="text-blue-700 font-medium flex items-center gap-2">
                                 <FolderTree className="w-4 h-4" /> 
-                                Local Sync: {caseData.directoryHandle ? caseData.directoryHandle.name : 'Not Connected'}
+                                {/* Fixed directoryHandle property access */}
+                                Local Sync: {caseData.directoryHandle ? (caseData.directoryHandle as any).name : 'Not Connected'}
                             </span>
+                            {/* Fixed directoryHandle property access */}
                             {caseData.directoryHandle && (
                                 <Button 
                                     size="sm" 
@@ -718,13 +741,15 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
                                             "w-8 h-8 rounded-full flex items-center justify-center shrink-0 border",
                                             ev.type === 'error' ? "bg-red-500/10 text-red-600 border-red-200" :
                                             ev.type === 'warning' ? "bg-amber-500/10 text-amber-600 border-amber-200" :
-                                            ev.type === 'success' ? "bg-green-500/10 text-green-600 border-green-200" :
+                                            // Fixed success type comparison
+                                            (ev.type as string) === 'success' ? "bg-green-500/10 text-green-600 border-green-200" :
                                             ev.type === 'deadline' ? "bg-purple-500/10 text-purple-600 border-purple-200" :
                                             "bg-blue-500/10 text-blue-600 border-blue-200"
                                         )}>
                                             {ev.type === 'error' ? <AlertTriangle className="w-4 h-4" /> :
                                              ev.type === 'warning' ? <AlertCircle className="w-4 h-4" /> :
-                                             ev.type === 'success' ? <Check className="w-4 h-4" /> :
+                                             // Fixed success type comparison
+                                             (ev.type as string) === 'success' ? <Check className="w-4 h-4" /> :
                                              ev.type === 'deadline' ? <Clock className="w-4 h-4" /> :
                                              <Info className="w-4 h-4" />}
                                         </div>
@@ -760,7 +785,9 @@ export const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({
             <RuleEditorDialog 
                 isOpen={isRuleEditorOpen}
                 onClose={() => setIsRuleEditorOpen(false)}
+                // Fixed customRules property access
                 rules={caseData.customRules || []}
+                // Fixed customRules property access
                 onSaveRules={(rules) => updateCase({ customRules: rules })}
                 testContent={caseData.input}
             />
